@@ -125,7 +125,7 @@ export default function DashboardPage() {
           >
             <Row gutter={16}>
               <Col span={4}><Card size="small"><Statistic title="设备总数" value={d.total} /></Card></Col>
-              {d.by_status.map((s) => (
+              {(d.by_status ?? []).map((s) => (
                 <Col span={3} key={s.status}>
                   <Card size="small">
                     <Statistic
@@ -149,11 +149,13 @@ export default function DashboardPage() {
             </Col>
             <Col span={8}>
               <Card title="各班组/内部单位设备数" size="small">
-                {d.by_team.length ? <Chart option={barOption(d.by_team)} height={240} /> : <div style={{ height: 240, lineHeight: '240px', textAlign: 'center', color: '#999' }}>暂无数据</div>}
+                {(d.by_team?.length ?? 0) > 0
+                  ? <Chart option={barOption(d.by_team ?? [])} height={240} />
+                  : <div style={{ height: 240, lineHeight: '240px', textAlign: 'center', color: '#999' }}>暂无数据</div>}
               </Card>
             </Col>
             <Col span={8}>
-              <Card title="各类别设备数" size="small"><Chart option={barOption(d.by_category)} height={240} /></Card>
+              <Card title="各类别设备数" size="small"><Chart option={barOption(d.by_category ?? [])} height={240} /></Card>
             </Col>
           </Row>
 
@@ -161,7 +163,7 @@ export default function DashboardPage() {
             <Col span={12}>
               <Card title="最近流转" size="small">
                 <Table rowKey={(r) => `${r.equipment_id}-${r.occurred_at}-${r.action_text}`} size="small"
-                  columns={flowCols} dataSource={d.recent_flows} pagination={false} />
+                  columns={flowCols} dataSource={d.recent_flows ?? []} pagination={false} />
               </Card>
             </Col>
             <Col span={12}>
@@ -171,7 +173,7 @@ export default function DashboardPage() {
                 extra={<Tag color={d.overdue_count > 0 ? 'red' : 'green'}>{d.overdue_count > 0 ? `${d.overdue_count} 台逾期` : '无逾期'}</Tag>}
               >
                 <Table rowKey="borrow_record_id" size="small" columns={borrowCols}
-                  dataSource={d.current_borrows} pagination={false} />
+                  dataSource={d.current_borrows ?? []} pagination={false} />
               </Card>
             </Col>
           </Row>

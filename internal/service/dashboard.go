@@ -67,7 +67,13 @@ var flowActionText = map[string]string{
 
 // DashboardStats 汇总首页所需统计（单机规模小，聚合成本可忽略）。
 func DashboardStats(db *gorm.DB) (*Dashboard, error) {
-	d := &Dashboard{}
+	d := &Dashboard{
+		// 空数据时输出 [] 而非 null（前端依赖数组语义，Go nil slice 会序列化为 null）
+		ByCategory:     []NameCount{},
+		ByTeam:         []NameCount{},
+		RecentFlows:    []FlowLine{},
+		CurrentBorrows: []BorrowLine{},
+	}
 	if err := db.Model(&models.Equipment{}).Count(&d.Total).Error; err != nil {
 		return nil, err
 	}
@@ -96,6 +102,9 @@ func DashboardStats(db *gorm.DB) (*Dashboard, error) {
 		Group("category.name").Order("count DESC").Scan(&catRows).Error; err != nil {
 		return nil, err
 	}
+	if catRows == nil {
+		catRows = []NameCount{}
+	}
 	d.ByCategory = catRows
 	// 班组/内部单位统计（当前班组使用中设备）
 	var teamRows []NameCount
@@ -104,6 +113,9 @@ func DashboardStats(db *gorm.DB) (*Dashboard, error) {
 		Where("equipment.status = ?", models.StatusInTeam).
 		Group("team.name").Order("count DESC").Scan(&teamRows).Error; err != nil {
 		return nil, err
+	}
+	if teamRows == nil {
+		teamRows = []NameCount{}
 	}
 	d.ByTeam = teamRows
 	// 最近流转（8 条）
