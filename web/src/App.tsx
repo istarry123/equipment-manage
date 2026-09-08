@@ -15,6 +15,8 @@ import EquipmentPage from './EquipmentPage';
 import ImportPage from './ImportPage';
 import TeamsPage from './TeamsPage';
 import BorrowsPage from './BorrowsPage';
+import BackupPage from './BackupPage';
+import SettingsPage from './SettingsPage';
 
 const { Header, Sider, Content } = Layout;
 
@@ -26,8 +28,8 @@ const MENU_ITEMS = [
   { key: 'borrow', icon: <ExportOutlined />, label: '外借管理' },
   { key: 'team', icon: <TeamOutlined />, label: '班组管理' },
   { key: 'import', icon: <ImportOutlined />, label: '数据导入' },
-  { key: 'backup', icon: <DatabaseOutlined />, label: '数据备份', disabled: true },
-  { key: 'settings', icon: <SettingOutlined />, label: '系统设置', disabled: true },
+  { key: 'backup', icon: <DatabaseOutlined />, label: '数据备份' },
+  { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 
 function renderPage(key: string) {
@@ -41,6 +43,10 @@ function renderPage(key: string) {
       return <TeamsPage />;
     case 'import':
       return <ImportPage />;
+    case 'backup':
+      return <BackupPage />;
+    case 'settings':
+      return <SettingsPage />;
     case 'dashboard':
     default:
       return <DashboardPage />;
@@ -58,7 +64,7 @@ export default function App() {
         </Typography.Title>
         <Badge
           status="processing"
-          text={<span style={{ color: '#aaa' }}>Phase 2</span>}
+          text={<span style={{ color: '#aaa' }}>Phase 5</span>}
           style={{ marginLeft: 24 }}
         />
       </Header>

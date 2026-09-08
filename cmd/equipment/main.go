@@ -18,6 +18,7 @@ import (
 	"equipment/internal/config"
 	"equipment/internal/database"
 	"equipment/internal/logger"
+	"equipment/internal/service"
 )
 
 // version 通过 -ldflags 覆盖；默认跟随发布版本。
@@ -55,6 +56,13 @@ func run() error {
 		return err
 	}
 	logger.Info("数据库迁移完成: %s", cfg.DBFile)
+
+	// 启动自动备份（决策：程序启动自动备份，保留最近 cfg.BackupKeep 份）
+	if name, err := service.BackupNow(db, cfg.DBFile, cfg.BackupKeep); err != nil {
+		logger.Error("启动自动备份失败: %v", err)
+	} else {
+		logger.Info("启动自动备份完成: %s", name)
+	}
 
 	router := api.New(db, version)
 

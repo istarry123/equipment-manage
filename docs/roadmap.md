@@ -159,3 +159,15 @@ equipment-manage/
 
 **API**：`POST /api/equipment/:id/flow`、`GET /api/equipment/:id/transactions`、`GET /api/borrows`、`POST /api/borrows/:id/return|extend`、班组/外借方 CRUD。
 **下一阶段**：Phase 5（Dashboard/统计/备份恢复/导出）。
+
+## 11. Phase 5 完成情况（2026-09-08，tag v0.6.0-phase5）
+
+- **Dashboard**：设备总数/六状态卡片/逾期外借数；ECharts 状态分布（环形）、各班组与各类别设备数（条形）；最近流转、当前外借（逾期标红）列表。
+- **Excel 导出**：`GET /api/export/equipment`（筛选与台账一致）输出 .xlsx（设备编号/名称/型号/类别/状态/当前位置/到达时间/内部码/备注/更新时间）。
+- **备份**：`backup/` 目录；**启动自动备份** + 手动备份（VACUUM INTO 一致性快照，WAL 安全）；默认保留最近 30 份（可修剪）；同秒冲突自动加序号。
+- **恢复**：危险操作需前端输入 RESTORE 确认；**恢复前自动备份当前库**（安全快照）→ 关连接 → 原子替换 → 重开并迁移 → 审计留痕；恢复后可回退（从快照再恢复）。
+- **系统设置页**：类别字典新增/列表 + 系统信息与运行边界提示。
+- 验证：service 单测（备份/修剪/防目录穿越/导出/统计）全绿；HTTP 冒烟全过（统计口径、导出 xlsx 魔数、手动备份、未确认恢复被拒、恢复 3→2 回滚、安全备份保留）；`go test ./...` 全绿。
+- 修复记录：恢复安全备份前缀校验过严（仅接受 equipment-*/pre-restore-*）→ 放宽为 backup/ 内任意 .db 且保留防穿越校验。
+
+**剩余（下一 Phase 6）**：Windows 打包（Win7+Win10 双环境回归、Chrome109 随附、自动开浏览器、使用说明）→ v1.0.0。
