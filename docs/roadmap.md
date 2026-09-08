@@ -171,3 +171,12 @@ equipment-manage/
 - 修复记录：恢复安全备份前缀校验过严（仅接受 equipment-*/pre-restore-*）→ 放宽为 backup/ 内任意 .db 且保留防穿越校验。
 
 **剩余（下一 Phase 6）**：Windows 打包（Win7+Win10 双环境回归、Chrome109 随附、自动开浏览器、使用说明）→ v1.0.0。
+
+## 12. Phase 6 完成情况（2026-09-08，tag v1.0.0）
+
+- 版本号统一 **v1.0.0**（后端 version + 前端标识 + 日志）。
+- `scripts/build-release.ps1`：前端构建 → `GOTOOLCHAIN=go1.20.14` + `CGO_ENABLED=0` 编译 → 组装 `release/equipment/`（exe/config/用户手册/backup/logs/install）。产物 27.9MB。
+- `docs/user-guide.md`：用户手册（运行环境/Win7 浏览器、首次 Excel 导入、页面功能、数据与备份、FAQ：端口占用/白屏强刷、防火墙、卸载导出）。
+- Chrome 109 离线包：本环境无法访问 dl.google.com，**未实机打包**；已在手册/交付说明给出获取 URL 与放 `install/` 的步骤（联网机器一次即可）。
+- 产物冒烟：健康检查 `version=1.0.0`、首页与资源加载、空库 Dashboard（6 状态 + 空数组非 null）全过；`go test ./...` 全绿。
+- 交付待办（需在目标电脑完成，见最终验收报告）：Win7 实机回归、Chrome109/FF115 安装、首次导入真实 Excel、重复编号数据清理。

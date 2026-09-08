@@ -68,4 +68,31 @@ Win7 机器需 Chrome 109 / Firefox ESR 115（交付物随附 Chrome 109 离线�
 | 版本 | 说明 |
 |---|---|
 | v0.1.0-phase0 | 需求与数据分析（docs/ 六份） |
-| v0.2.0-phase1 | 项目骨架（本版）：Go 后端 + SQLite 迁移 + REST 框架 + React 骨架 + exe 可运行 |
+| v0.2.0-phase1 | 项目骨架：Go 后端 + SQLite 迁移 + REST 框架 + React 骨架 + exe 可运行 |
+| v0.3.0-phase2 | Excel 数据导入（真实文件 2147→1477 台入库验证） |
+| v0.4.0-phase3 | 设备台账（搜索/筛选/详情/新增/编辑/受限更正） |
+| v0.5.0-phase4 | 设备流转（八类动作+外借单+历史时间线+班组/外借方管理） |
+| v0.6.0-phase5 | Dashboard 统计、Excel 导出、备份/恢复 |
+| **v1.0.0** | **Windows 交付版**：Go1.20.14 发布构建 + 用户手册 + 发布脚本 |
+
+## 发布构建（Windows）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-release.ps1
+# 产物：release\equipment\（equipment.exe + config.yaml + 用户手册 + backup/logs/install）
+```
+
+- Win7 兼容：发布脚本用 `GOTOOLCHAIN=go1.20.14` + `CGO_ENABLED=0` 构建（决策 11）；
+- Win7 需 Chrome 109 / Firefox ESR 115（获取方式见 `docs/user-guide.md` 第 1 节）。
+
+## 最终使用结构
+
+```text
+equipment/
+├── equipment.exe     双击即用（自动建库、自动备份、自动开浏览器）
+├── equipment.db      运行生成（勿手工编辑）
+├── config.yaml       端口等配置（缺失自动生成）
+├── user-guide.md     用户手册
+├── backup/           备份（启动自动 + 手动；保留最近 30 份）
+└── logs/             日志
+```

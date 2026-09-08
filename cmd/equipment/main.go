@@ -22,7 +22,7 @@ import (
 )
 
 // version 通过 -ldflags 覆盖；默认跟随发布版本。
-var version = "0.2.0-phase1"
+var version = "1.0.0"
 
 func main() {
 	if err := run(); err != nil {

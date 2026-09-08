@@ -64,7 +64,7 @@ export default function App() {
         </Typography.Title>
         <Badge
           status="processing"
-          text={<span style={{ color: '#aaa' }}>Phase 5</span>}
+          text={<span style={{ color: '#aaa' }}>v1.0.0</span>}
           style={{ marginLeft: 24 }}
         />
       </Header>
