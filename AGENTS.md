@@ -64,5 +64,5 @@
 
 - Git：`main` 分支已初始化；基线提交完成（主章程 + 本治理文件 + 内嵌 Skill + `设备借出总账.xlsx` 入库）。
 - 数据源：`设备借出总账.xlsx` 已在工作区（单 Sheet「设备借出总账」；R2 表头 11 列：类别/设备名称/设备型号/台账数量/财务数量/台账设备编号/时间/公司/台数/借出设备编号/备注；含合并单元格、跨行主块、多行/空格分隔编号）。
-- 进度：**Phase 0 已完成（2026-09-07，待验收）**：决策基线 14 项锁定；`docs/` 六份文档产出（requirements / data-analysis / database-design / state-machine / import-rules / roadmap）；源数据待确认清单 W-1…W-15（Blockers：W-1/W-2/W-3/W-4/W-5，见 docs/import-rules.md §8）。**Phase 1 未启动**。
-- 下一任务：Phase 1（需用户验收 Phase 0 并下达指令）——按 docs/roadmap.md §3 建骨架；启动前用户需答复 W-1/W-2（可并行）。
+- 进度：**Phase 1 已完成（2026-09-08，待验收）**：Phase 0 六份文档基线；骨架落地 —— Go1.20.14 工具链可编译、SQLite 版本化迁移（8 表）、Gin REST(/api/health)、React+AntD 骨架（go:embed 内嵌、target chrome109）、`equipment.exe` 冒烟通过（8080/health/SPA/404）、单测全绿（tag v0.2.0-phase1）。源数据待确认清单 W-1…W-15 中 Blockers（W-1/W-2/W-3/W-4/W-5）仍待用户答复，**Phase 2（Excel 导入）启动前必须**。**Phase 2 未启动**。
+- 下一任务：Phase 2（需用户验收 Phase 1 并下达指令）——按 docs/import-rules.md 实现 Excel 导入（Tier1 台账优先）。

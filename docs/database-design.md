@@ -103,6 +103,8 @@ settings(key/value) → 系统参数
 
 ### 2.6 transaction（流转历史，**永久保存、禁止删除**）
 
+> 实现说明：概念实体名 transaction；**物理表名为 `flow_record`**（避开 SQLite 保留关键字 `TRANSACTION`），模型 TableName 与迁移 SQL 均使用 `flow_record`。
+
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | INTEGER PK | |

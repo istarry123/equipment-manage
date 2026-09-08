@@ -1,0 +1,27 @@
+{
+  "name": "equipment-web",
+  "private": true,
+  "version": "0.2.0-phase1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@ant-design/icons": "5.2.6",
+    "antd": "5.8.6",
+    "dayjs": "1.11.9",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.4.5",
+    "@types/react": "18.2.15",
+    "@types/react-dom": "18.2.7",
+    "@vitejs/plugin-react": "4.0.4",
+    "typescript": "5.1.6",
+    "vite": "4.4.9"
+  }
+}

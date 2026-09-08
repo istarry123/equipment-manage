@@ -66,12 +66,17 @@ equipment-manage/
 
 ### 3.4 Phase 1 验收
 
-- [ ] 双击 exe 自动打开 8080 并显示骨架页
-- [ ] 空库自动迁移成功、重复启动幂等
-- [ ] 依赖矩阵在 Go1.20 下 `go build` 通过
-- [ ] 前端构建产物经 go:embed 内嵌生效
-- [ ] 单测通过（`go test ./...`）
-- [ ] Git tag v0.2.0-phase1 + 阶段报告
+- [x] 双击 exe 自动打开 8080 并显示骨架页（实现：EQ_NO_BROWSER=1 可禁用；自动打开见 internal/browser）
+- [x] 空库自动迁移成功、重复启动幂等（user_version 迁移器 + 单测）
+- [x] 依赖矩阵在 Go1.20 下 `go build` 通过（GOTOOLCHAIN=go1.20.14 实测产出 exe）
+- [x] 前端构建产物经 go:embed 内嵌生效（/api/health、SPA 回退均已冒烟）
+- [x] 单测通过（`go test ./...`）
+- [x] Git tag v0.2.0-phase1 + 阶段报告
+
+**Phase 1 实现备注**：
+- 流转历史概念表 transaction 因 SQLite 保留关键字，物理表名定为 `flow_record`（models.TableName 与迁移 SQL 一致，docs/database-design.md §2.6 已注明）。
+- GORM 官方 `gorm.io/driver/sqlite` 依赖 CGO 的 mattn 驱动，无法满足 `CGO_ENABLED=0`；采用纯 Go dialector `github.com/glebarez/sqlite`（modernc 内核）。
+- Go 依赖经 goproxy.cn 拉取；工具链 go1.20.14 由 GOTOOLCHAIN 自动下载验证。
 
 ## 4. 后续阶段要点（衔接）
 

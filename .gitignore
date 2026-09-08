@@ -17,6 +17,11 @@ dist/
 node_modules/
 frontend/node_modules/
 frontend/dist/
+web/node_modules/
+web/dist/
+# 前端构建产物（go:embed 内嵌，不入库）
+internal/webui/dist/
+.npm-cache/
 *.local
 
 # ===== IDE / OS =====
