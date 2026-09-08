@@ -13,6 +13,8 @@ import {
 import DashboardPage from './DashboardPage';
 import EquipmentPage from './EquipmentPage';
 import ImportPage from './ImportPage';
+import TeamsPage from './TeamsPage';
+import BorrowsPage from './BorrowsPage';
 
 const { Header, Sider, Content } = Layout;
 
@@ -20,9 +22,9 @@ const { Header, Sider, Content } = Layout;
 const MENU_ITEMS = [
   { key: 'dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
   { key: 'equipment', icon: <AppstoreOutlined />, label: '设备台账' },
-  { key: 'flow', icon: <SwapOutlined />, label: '设备流转', disabled: true },
-  { key: 'borrow', icon: <ExportOutlined />, label: '外借管理', disabled: true },
-  { key: 'team', icon: <TeamOutlined />, label: '班组管理', disabled: true },
+  { key: 'flow', icon: <SwapOutlined />, label: '设备流转' },
+  { key: 'borrow', icon: <ExportOutlined />, label: '外借管理' },
+  { key: 'team', icon: <TeamOutlined />, label: '班组管理' },
   { key: 'import', icon: <ImportOutlined />, label: '数据导入' },
   { key: 'backup', icon: <DatabaseOutlined />, label: '数据备份', disabled: true },
   { key: 'settings', icon: <SettingOutlined />, label: '系统设置', disabled: true },
@@ -31,7 +33,12 @@ const MENU_ITEMS = [
 function renderPage(key: string) {
   switch (key) {
     case 'equipment':
+    case 'flow': // 流转操作入口：在设备详情中按当前状态提供可用动作
       return <EquipmentPage />;
+    case 'borrow':
+      return <BorrowsPage />;
+    case 'team':
+      return <TeamsPage />;
     case 'import':
       return <ImportPage />;
     case 'dashboard':

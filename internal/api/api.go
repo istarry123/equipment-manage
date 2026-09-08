@@ -48,10 +48,21 @@ func New(db *gorm.DB, version string) *gin.Engine {
 		api.GET("/equipment/:id", s.GetEquipment)
 		api.PUT("/equipment/:id", s.EditEquipment)
 		api.POST("/equipment/:id/correct", s.CorrectEquipment)
+		api.POST("/equipment/:id/flow", s.DoFlow)
+		api.GET("/equipment/:id/transactions", s.ListTransactions)
 
 		api.GET("/categories", s.ListCategories)
 		api.POST("/categories", s.CreateCategory)
 		api.GET("/teams", s.ListTeams)
+		api.POST("/teams", s.CreateTeam)
+		api.PUT("/teams/:id", s.UpdateTeam)
+
+		api.GET("/borrows", s.ListBorrows)
+		api.POST("/borrows/:id/return", s.ReturnBorrow)
+		api.POST("/borrows/:id/extend", s.ExtendBorrow)
+		api.GET("/borrowers", s.ListBorrowers)
+		api.POST("/borrowers", s.CreateBorrower)
+		api.PUT("/borrowers/:id", s.UpdateBorrower)
 	}
 
 	// ---- 前端静态资源（SPA） ----

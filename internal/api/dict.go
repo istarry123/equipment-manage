@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"equipment/internal/models"
+	"equipment/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -84,4 +85,47 @@ func (s *Server) ListTeams(c *gin.Context) {
 		items = append(items, teamItem{ID: r.ID, Name: r.Name, IsActive: r.IsActive})
 	}
 	c.JSON(http.StatusOK, items)
+}
+
+// CreateTeam POST /api/teams 新增班组/内部单位。
+func (s *Server) CreateTeam(c *gin.Context) {
+	var body struct {
+		Name       string `json:"name"`
+		Department string `json:"department"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeError(c, http.StatusBadRequest, "请求参数错误")
+		return
+	}
+	t, err := service.CreateTeam(s.DB, body.Name, body.Department)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"id": t.ID, "name": t.Name})
+}
+
+// UpdateTeam PUT /api/teams/:id（改名/部门/停用）。
+func (s *Server) UpdateTeam(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	var body struct {
+		Name       string  `json:"name"`
+		Department *string `json:"department"`
+		IsActive   *bool   `json:"is_active"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeError(c, http.StatusBadRequest, "请求参数错误")
+		return
+	}
+	t, err := service.UpdateTeam(s.DB, id, service.UpdateTeamInput{
+		Name: body.Name, Department: body.Department, IsActive: body.IsActive,
+	})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": t.ID, "name": t.Name, "is_active": t.IsActive})
 }

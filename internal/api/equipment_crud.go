@@ -116,6 +116,21 @@ func writeServiceError(c *gin.Context, err error) {
 		writeError(c, http.StatusNotFound, "记录不存在")
 	case errors.Is(err, service.ErrDuplicate):
 		writeError(c, http.StatusConflict, "同名称同型号下该编号已存在，无法保存")
+	case errors.Is(err, service.ErrDuplicateName):
+		writeError(c, http.StatusConflict, "该名称已存在")
+	case errors.Is(err, service.ErrNoOpenBorrow):
+		writeError(c, http.StatusConflict, "该设备没有未归还的外借单，无法归还")
+	case errors.Is(err, service.ErrNoScrapAfter):
+		writeError(c, http.StatusBadRequest, "设备已报废（终态），不可再流转")
+	case errors.Is(err, service.ErrInvalidTransition),
+		errors.Is(err, service.ErrUnknownAction),
+		errors.Is(err, service.ErrTeamRequired),
+		errors.Is(err, service.ErrTeamNotActive),
+		errors.Is(err, service.ErrTeamSame),
+		errors.Is(err, service.ErrBorrowerRequired),
+		errors.Is(err, service.ErrBorrowerInactive),
+		errors.Is(err, service.ErrScrapReason):
+		writeError(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrEmptyName):
 		writeError(c, http.StatusBadRequest, "设备名称不能为空")
 	case errors.Is(err, service.ErrOperator):

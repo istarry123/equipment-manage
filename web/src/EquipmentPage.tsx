@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Button,
   Card,
+  DatePicker,
   Descriptions,
   Drawer,
   Form,
@@ -12,14 +14,17 @@ import {
   Space,
   Table,
   Tag,
+  Timeline,
   Typography,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import dayjs from 'dayjs';
 
 // ---------- 类型 ----------
 interface Category { id: number; name: string }
 interface Team { id: number; name: string; is_active: boolean }
+interface Borrower { id: number; name: string; contact: string; phone: string; is_active: boolean }
 
 interface EqItem {
   id: number;
@@ -42,6 +47,13 @@ interface EqItem {
 }
 
 interface EqResp { total: number; items: EqItem[] }
+interface TxnItem {
+  id: number; action: string; action_text: string;
+  from_status: string; to_status: string;
+  from_team_name: string; to_team_name: string;
+  borrower_name: string;
+  occurred_at: string; operator: string; remark: string;
+}
 
 const STATUS_OPTIONS = [
   { value: 'IN_STOCK', text: '在库', color: 'green' },
@@ -51,7 +63,6 @@ const STATUS_OPTIONS = [
   { value: 'SCRAPPED', text: '报废', color: 'default' },
   { value: 'OTHER', text: '其他', color: 'purple' },
 ];
-
 const statusMeta: Record<string, { text: string; color: string }> = Object.fromEntries(
   STATUS_OPTIONS.map((s) => [s.value, { text: s.text, color: s.color }]),
 );
@@ -73,22 +84,25 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-function locationText(e: EqItem): string {
-  switch (e.status) {
-    case 'IN_STOCK':
-      return '仓库（在库）';
-    case 'IN_TEAM':
-      return e.current_team || '班组使用';
-    case 'BORROWED':
-      return e.current_borrower || '外借';
-    case 'MAINTENANCE':
-      return '维修中';
-    case 'SCRAPPED':
-      return '已报废';
-    default:
-      return e.status;
-  }
-}
+// 依据状态给出可执行动作
+const ACTIONS_BY_STATUS: Record<string, string[]> = {
+  IN_STOCK: ['OUT_TO_TEAM', 'BORROW', 'TO_MAINTENANCE', 'SCRAP'],
+  IN_TEAM: ['HANDOVER', 'BORROW', 'RETURN_FROM_TEAM', 'TO_MAINTENANCE', 'SCRAP'],
+  BORROWED: ['RETURN_BORROW', 'SCRAP'],
+  MAINTENANCE: ['FROM_MAINTENANCE'],
+  SCRAPPED: [],
+  OTHER: ['SCRAP'],
+};
+const ACTION_TEXT: Record<string, string> = {
+  OUT_TO_TEAM: '出库给班组',
+  HANDOVER: '班组转交',
+  RETURN_FROM_TEAM: '班组归还入库',
+  BORROW: '外借',
+  RETURN_BORROW: '外借归还',
+  TO_MAINTENANCE: '送修',
+  FROM_MAINTENANCE: '维修完成',
+  SCRAP: '报废',
+};
 
 export default function EquipmentPage() {
   const [q, setQ] = useState('');
@@ -102,26 +116,33 @@ export default function EquipmentPage() {
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [borrowers, setBorrowers] = useState<Borrower[]>([]);
 
   const [detail, setDetail] = useState<EqItem | null>(null);
+  const [txns, setTxns] = useState<TxnItem[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [correctOpen, setCorrectOpen] = useState(false);
+  const [flowAction, setFlowAction] = useState<string>('');
+  const [flowSaving, setFlowSaving] = useState(false);
   const [formCreate] = Form.useForm();
   const [formEdit] = Form.useForm();
   const [formCorrect] = Form.useForm();
+  const [formFlow] = Form.useForm();
   const [saving, setSaving] = useState(false);
 
   const loadDicts = useCallback(async () => {
     try {
-      const [c, t] = await Promise.all([
+      const [c, t, b] = await Promise.all([
         req<Category[]>('/api/categories'),
         req<Team[]>('/api/teams'),
+        req<Borrower[]>('/api/borrowers'),
       ]);
       setCategories(c);
       setTeams(t.filter((x) => x.is_active));
+      setBorrowers(b.filter((x) => x.is_active));
     } catch {
-      /* 字典失败不影响列表 */
+      /* 忽略 */
     }
   }, []);
 
@@ -135,14 +156,22 @@ export default function EquipmentPage() {
       if (fCategory) params.set('category', String(fCategory));
       if (fStatus) params.set('status', fStatus);
       if (fTeam) params.set('team', String(fTeam));
-      const resp = await req<EqResp>(`/api/equipment?${params.toString()}`);
-      setData(resp);
+      setData(await req<EqResp>(`/api/equipment?${params.toString()}`));
     } catch (e) {
       message.error(e instanceof Error ? e.message : '加载失败');
     } finally {
       setLoading(false);
     }
   }, [q, fCategory, fStatus, fTeam, page]);
+
+  const loadTxns = useCallback(async (id: number) => {
+    try {
+      const r = await req<{ total: number; items: TxnItem[] }>(`/api/equipment/${id}/transactions?limit=200`);
+      setTxns(r.items);
+    } catch {
+      setTxns([]);
+    }
+  }, []);
 
   useEffect(() => {
     void loadDicts();
@@ -155,24 +184,30 @@ export default function EquipmentPage() {
     try {
       const item = await req<EqItem>(`/api/equipment/${id}`);
       setDetail(item);
+      void loadTxns(id);
     } catch (e) {
       message.error(e instanceof Error ? e.message : '加载详情失败');
     }
-  }, []);
+  }, [loadTxns]);
+
+  const refreshDetail = useCallback(async () => {
+    if (!detail) return;
+    await openDetail(detail.id);
+    void load();
+  }, [detail, load, openDetail]);
 
   const submitCreate = useCallback(async () => {
     const v = await formCreate.validateFields();
     setSaving(true);
     try {
-      const body = {
-        equipment_no: v.equipment_no || null,
-        name: v.name,
-        model: v.model ?? '',
-        category_id: v.category_id ?? null,
-        remark: v.remark ?? '',
-        operator: v.operator,
-      };
-      await req('/api/equipment', { method: 'POST', body: JSON.stringify(body) });
+      await req('/api/equipment', {
+        method: 'POST',
+        body: JSON.stringify({
+          equipment_no: v.equipment_no || null,
+          name: v.name, model: v.model ?? '', category_id: v.category_id ?? null,
+          remark: v.remark ?? '', operator: v.operator,
+        }),
+      });
       setOperator(v.operator);
       message.success('设备已新增');
       setCreateOpen(false);
@@ -192,12 +227,7 @@ export default function EquipmentPage() {
     try {
       await req(`/api/equipment/${detail.id}`, {
         method: 'PUT',
-        body: JSON.stringify({
-          name: v.name,
-          model: v.model ?? '',
-          category_id: v.category_id ?? null,
-          remark: v.remark ?? '',
-        }),
+        body: JSON.stringify({ name: v.name, model: v.model ?? '', category_id: v.category_id ?? null, remark: v.remark ?? '' }),
       });
       message.success('已保存');
       setEditOpen(false);
@@ -217,24 +247,72 @@ export default function EquipmentPage() {
     try {
       await req(`/api/equipment/${detail.id}/correct`, {
         method: 'POST',
-        body: JSON.stringify({
-          equipment_no: v.equipment_no ?? null,
-          reason: v.reason,
-          operator: v.operator,
-        }),
+        body: JSON.stringify({ equipment_no: v.equipment_no ?? null, reason: v.reason, operator: v.operator }),
       });
       setOperator(v.operator);
       message.success('受限更正完成（已记审计）');
       setCorrectOpen(false);
       formCorrect.resetFields();
-      await openDetail(detail.id);
-      void load();
+      await refreshDetail();
     } catch (e) {
       message.error(e instanceof Error ? e.message : '更正失败');
     } finally {
       setSaving(false);
     }
-  }, [detail, formCorrect, load, openDetail]);
+  }, [detail, formCorrect, refreshDetail]);
+
+  const openFlow = useCallback((action: string) => {
+    formFlow.resetFields();
+    formFlow.setFieldsValue({ operator: getOperator() });
+    setFlowAction(action);
+  }, [formFlow]);
+
+  const submitFlow = useCallback(async () => {
+    if (!detail) return;
+    const v = await formFlow.validateFields();
+    setFlowSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        action: flowAction,
+        operator: v.operator,
+        to_team_id: v.to_team_id ?? null,
+        borrower_id: v.borrower_id ?? null,
+        expected_return_date: v.expected_return_date ? v.expected_return_date.format('YYYY-MM-DD') : null,
+        remark: v.remark ?? '',
+      };
+      await req(`/api/equipment/${detail.id}/flow`, { method: 'POST', body: JSON.stringify(body) });
+      setOperator(v.operator);
+      message.success(`${ACTION_TEXT[flowAction]} 完成`);
+      setFlowAction('');
+      await refreshDetail();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '操作失败');
+    } finally {
+      setFlowSaving(false);
+    }
+  }, [detail, flowAction, formFlow, refreshDetail]);
+
+  const flowNeedsTeam = flowAction === 'OUT_TO_TEAM' || flowAction === 'HANDOVER';
+  const flowNeedsBorrower = flowAction === 'BORROW';
+  const flowRemarkRequired = flowAction === 'SCRAP';
+  const flowRemarkLabel = flowAction === 'SCRAP' ? '报废原因' : flowAction === 'BORROW' ? '备注' : '备注';
+
+  const locationText = (e: EqItem): string => {
+    switch (e.status) {
+      case 'IN_STOCK': return '仓库（在库）';
+      case 'IN_TEAM': return e.current_team || '班组使用';
+      case 'BORROWED': return e.current_borrower || '外借';
+      case 'MAINTENANCE': return '维修中';
+      case 'SCRAPPED': return '已报废';
+      default: return e.status;
+    }
+  };
+
+  const txnText = (t: TxnItem): string => {
+    const fromLoc = t.from_team_name || t.borrower_name || t.from_status;
+    const toLoc = t.to_team_name || t.borrower_name || t.to_status;
+    return `${t.action_text}：${fromLoc} → ${toLoc}`;
+  };
 
   const columns: ColumnsType<EqItem> = useMemo(
     () => [
@@ -264,209 +342,206 @@ export default function EquipmentPage() {
       {
         title: '操作', key: 'op', width: 90,
         render: (_: unknown, r: EqItem) => (
-          <Button type="link" size="small" onClick={() => void openDetail(r.id)}>
-            详情
-          </Button>
+          <Button type="link" size="small" onClick={() => void openDetail(r.id)}>详情/流转</Button>
         ),
       },
     ],
     [openDetail],
   );
 
+  const actions = detail ? ACTIONS_BY_STATUS[detail.status] ?? [] : [];
+
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Card
-        title="设备台账"
+        title="设备台账 / 流转"
         extra={
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={loading}>
-              刷新
-            </Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => {
-                formCreate.setFieldsValue({ operator: getOperator() });
-                setCreateOpen(true);
-              }}
-            >
+            <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={loading}>刷新</Button>
+            <Button type="primary" icon={<PlusOutlined />}
+              onClick={() => { formCreate.setFieldsValue({ operator: getOperator() }); setCreateOpen(true); }}>
               新增设备
             </Button>
           </Space>
         }
       >
         <Space wrap style={{ marginBottom: 12 }}>
-          <Input.Search
-            allowClear
-            placeholder="编号 / 名称 / 型号 / 内部码"
-            style={{ width: 260 }}
-            onSearch={(v) => {
-              setQ(v.trim());
-              setPage(1);
-            }}
-          />
-          <Select
-            allowClear placeholder="类别" style={{ width: 150 }}
-            options={categories.map((c) => ({ value: c.id, label: c.name }))}
-            value={fCategory}
-            onChange={(v) => {
-              setFCategory(v);
-              setPage(1);
-            }}
-          />
-          <Select
-            allowClear placeholder="状态" style={{ width: 130 }}
-            options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.text }))}
-            value={fStatus}
-            onChange={(v) => {
-              setFStatus(v);
-              setPage(1);
-            }}
-          />
-          <Select
-            allowClear placeholder="班组/内部单位" style={{ width: 170 }}
-            options={teams.map((t) => ({ value: t.id, label: t.name }))}
-            value={fTeam}
-            onChange={(v) => {
-              setFTeam(v);
-              setPage(1);
-            }}
-          />
+          <Input.Search allowClear placeholder="编号 / 名称 / 型号 / 内部码" style={{ width: 260 }}
+            onSearch={(v) => { setQ(v.trim()); setPage(1); }} />
+          <Select allowClear placeholder="类别" style={{ width: 150 }}
+            options={categories.map((c) => ({ value: c.id, label: c.name }))} value={fCategory}
+            onChange={(v) => { setFCategory(v); setPage(1); }} />
+          <Select allowClear placeholder="状态" style={{ width: 130 }}
+            options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.text }))} value={fStatus}
+            onChange={(v) => { setFStatus(v); setPage(1); }} />
+          <Select allowClear placeholder="班组/内部单位" style={{ width: 170 }}
+            options={teams.map((t) => ({ value: t.id, label: t.name }))} value={fTeam}
+            onChange={(v) => { setFTeam(v); setPage(1); }} />
         </Space>
-        <Table
-          rowKey="id"
-          loading={loading}
-          size="middle"
-          columns={columns}
-          dataSource={data?.items ?? []}
+        <Table rowKey="id" loading={loading} size="middle" columns={columns} dataSource={data?.items ?? []}
           onRow={(r) => ({ onDoubleClick: () => void openDetail(r.id) })}
           pagination={{
-            current: page,
-            pageSize,
-            total: data?.total ?? 0,
-            showSizeChanger: false,
-            showTotal: (t) => `共 ${t} 台`,
-            onChange: (p) => setPage(p),
-          }}
-        />
+            current: page, pageSize, total: data?.total ?? 0, showSizeChanger: false,
+            showTotal: (t) => `共 ${t} 台`, onChange: (p) => setPage(p),
+          }} />
       </Card>
 
       {/* 新增设备 */}
       <Modal title="新增设备" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void submitCreate()} confirmLoading={saving}>
         <Form form={formCreate} labelCol={{ span: 6 }} wrapperCol={{ span: 17 }}>
-          <Form.Item name="equipment_no" label="设备编号" extra="留空 = 无编号设备（系统生成内部码）">
+          <Form.Item name="equipment_no" label="设备编号" extra="留空 = 无编号设备">
             <Input placeholder="如 6061" />
           </Form.Item>
-          <Form.Item name="name" label="设备名称" rules={[{ required: true, message: '必填' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="model" label="型号">
-            <Input />
-          </Form.Item>
+          <Form.Item name="name" label="设备名称" rules={[{ required: true, message: '必填' }]}><Input /></Form.Item>
+          <Form.Item name="model" label="型号"><Input /></Form.Item>
           <Form.Item name="category_id" label="类别" rules={[{ required: true, message: '请选择类别' }]}>
             <Select options={categories.map((c) => ({ value: c.id, label: c.name }))} placeholder="选择类别" />
           </Form.Item>
-          <Form.Item name="remark" label="备注">
-            <Input.TextArea rows={2} />
-          </Form.Item>
-          <Form.Item name="operator" label="操作人" rules={[{ required: true, message: '必填' }]}>
-            <Input placeholder="操作人" />
-          </Form.Item>
+          <Form.Item name="remark" label="备注"><Input.TextArea rows={2} /></Form.Item>
+          <Form.Item name="operator" label="操作人" rules={[{ required: true, message: '必填' }]}><Input /></Form.Item>
         </Form>
       </Modal>
 
-      {/* 详情 */}
+      {/* 详情抽屉 */}
       <Drawer
         title={detail ? `${detail.name}（${detail.equipment_no ?? '无编号'}）` : '详情'}
         open={!!detail}
-        width={520}
-        onClose={() => setDetail(null)}
+        width={560}
+        onClose={() => { setDetail(null); setFlowAction(''); }}
         extra={
           detail && (
             <Space>
-              <Button
-                onClick={() => {
-                  formEdit.setFieldsValue({
-                    name: detail.name, model: detail.model,
-                    category_id: detail.category_id, remark: detail.remark,
-                  });
-                  setEditOpen(true);
-                }}
-              >
-                编辑基本信息
-              </Button>
-              <Button
-                type="primary" danger
-                onClick={() => {
-                  formCorrect.setFieldsValue({ equipment_no: detail.equipment_no, operator: getOperator() });
-                  setCorrectOpen(true);
-                }}
-              >
-                受限更正
-              </Button>
+              <Button onClick={() => {
+                formEdit.setFieldsValue({
+                  name: detail.name, model: detail.model,
+                  category_id: detail.category_id, remark: detail.remark,
+                });
+                setEditOpen(true);
+              }}>编辑</Button>
+              <Button type="primary" danger onClick={() => {
+                formCorrect.setFieldsValue({ equipment_no: detail.equipment_no, operator: getOperator() });
+                setCorrectOpen(true);
+              }}>受限更正</Button>
             </Space>
           )
         }
       >
         {detail && (
-          <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="内部码">{detail.internal_code}</Descriptions.Item>
-            <Descriptions.Item label="设备编号">{detail.equipment_no ?? '无编号'}</Descriptions.Item>
-            <Descriptions.Item label="名称">{detail.name}</Descriptions.Item>
-            <Descriptions.Item label="型号">{detail.model || '-'}</Descriptions.Item>
-            <Descriptions.Item label="类别">{detail.category || '-'}</Descriptions.Item>
-            <Descriptions.Item label="状态">
-              {(() => {
-                const m = statusMeta[detail.status];
-                return m ? <Tag color={m.color}>{m.text}</Tag> : detail.status;
-              })()}
-            </Descriptions.Item>
-            <Descriptions.Item label="当前位置">{locationText(detail)}</Descriptions.Item>
-            <Descriptions.Item label="当前班组/内部单位">{detail.current_team || '-'}</Descriptions.Item>
-            <Descriptions.Item label="当前外借方">{detail.current_borrower || '-'}</Descriptions.Item>
-            <Descriptions.Item label="到达当前状态时间">{detail.current_since ?? '-'}</Descriptions.Item>
-            <Descriptions.Item label="备注">{detail.remark || '-'}</Descriptions.Item>
-            <Descriptions.Item label="创建时间">{detail.created_at}</Descriptions.Item>
-            <Descriptions.Item label="更新时间">{detail.updated_at}</Descriptions.Item>
-          </Descriptions>
+          <>
+            <Descriptions column={1} bordered size="small">
+              <Descriptions.Item label="内部码">{detail.internal_code}</Descriptions.Item>
+              <Descriptions.Item label="设备编号">{detail.equipment_no ?? '无编号'}</Descriptions.Item>
+              <Descriptions.Item label="名称">{detail.name}</Descriptions.Item>
+              <Descriptions.Item label="型号">{detail.model || '-'}</Descriptions.Item>
+              <Descriptions.Item label="类别">{detail.category || '-'}</Descriptions.Item>
+              <Descriptions.Item label="状态">
+                {(() => {
+                  const m = statusMeta[detail.status];
+                  return m ? <Tag color={m.color}>{m.text}</Tag> : detail.status;
+                })()}
+              </Descriptions.Item>
+              <Descriptions.Item label="当前位置">{locationText(detail)}</Descriptions.Item>
+              <Descriptions.Item label="到达当前状态时间">{detail.current_since ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label="备注">{detail.remark || '-'}</Descriptions.Item>
+            </Descriptions>
+
+            <Card size="small" title="流转操作" style={{ marginTop: 12 }}>
+              {actions.length === 0 ? (
+                <Typography.Text type="secondary">当前状态无可执行操作（已报废等）</Typography.Text>
+              ) : (
+                <Space wrap>
+                  {actions.map((a) => (
+                    <Button key={a} type={a === 'SCRAP' ? 'default' : 'primary'}
+                      danger={a === 'SCRAP' || a === 'RETURN_BORROW'}
+                      onClick={() => openFlow(a)}>
+                      {ACTION_TEXT[a]}
+                    </Button>
+                  ))}
+                </Space>
+              )}
+            </Card>
+
+            <Card size="small" title={`流转历史（${txns.length} 条，最近在前）`} style={{ marginTop: 12 }}>
+              {txns.length === 0 ? (
+                <Typography.Text type="secondary">暂无历史</Typography.Text>
+              ) : (
+                <Timeline
+                  items={txns.slice(0, 40).map((t) => ({
+                    color: t.action === 'SCRAP' ? 'red' : 'blue',
+                    children: (
+                      <>
+                        <div>
+                          <b>{txnText(t)}</b>
+                          <Typography.Text type="secondary" style={{ float: 'right' }}>{t.occurred_at}</Typography.Text>
+                        </div>
+                        <div><Typography.Text type="secondary">操作人：{t.operator}</Typography.Text></div>
+                        {t.remark && <div><Typography.Text type="secondary">备注：{t.remark}</Typography.Text></div>}
+                      </>
+                    ),
+                  }))}
+                />
+              )}
+            </Card>
+          </>
         )}
       </Drawer>
 
-      {/* 编辑基本信息（不含编号） */}
-      <Modal title="编辑基本信息（编号不可直接修改，需走受限更正）" open={editOpen}
+      {/* 编辑基本信息 */}
+      <Modal title="编辑基本信息（编号需走受限更正）" open={editOpen}
         onCancel={() => setEditOpen(false)} onOk={() => void submitEdit()} confirmLoading={saving}>
         <Form form={formEdit} labelCol={{ span: 6 }} wrapperCol={{ span: 17 }}>
-          <Form.Item name="name" label="设备名称" rules={[{ required: true, message: '必填' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="model" label="型号">
-            <Input />
-          </Form.Item>
+          <Form.Item name="name" label="设备名称" rules={[{ required: true, message: '必填' }]}><Input /></Form.Item>
+          <Form.Item name="model" label="型号"><Input /></Form.Item>
           <Form.Item name="category_id" label="类别" rules={[{ required: true, message: '请选择类别' }]}>
             <Select options={categories.map((c) => ({ value: c.id, label: c.name }))} />
           </Form.Item>
-          <Form.Item name="remark" label="备注">
-            <Input.TextArea rows={2} />
-          </Form.Item>
+          <Form.Item name="remark" label="备注"><Input.TextArea rows={2} /></Form.Item>
         </Form>
       </Modal>
 
-      {/* 受限更正（决策 13） */}
-      <Modal title="受限更正（编号/字段修正将记录审计）" open={correctOpen}
+      {/* 受限更正 */}
+      <Modal title="受限更正（记录审计）" open={correctOpen}
         onCancel={() => setCorrectOpen(false)} onOk={() => void submitCorrect()} confirmLoading={saving}>
-        <Typography.Paragraph type="warning">
-          本功能仅用于更正录入错误的设备编号等字段，须填写原因并记录审计；请勿用作日常修改。
-        </Typography.Paragraph>
+        <Typography.Paragraph type="warning">仅用于更正录入错误，须填原因并记录审计。</Typography.Paragraph>
         <Form form={formCorrect} labelCol={{ span: 6 }} wrapperCol={{ span: 17 }}>
-          <Form.Item name="equipment_no" label="设备编号" extra="留空 = 清为无编号">
-            <Input />
-          </Form.Item>
+          <Form.Item name="equipment_no" label="设备编号" extra="留空 = 清为无编号"><Input /></Form.Item>
           <Form.Item name="reason" label="更正原因" rules={[{ required: true, message: '必填' }]}>
             <Input.TextArea rows={2} placeholder="如：导入时编号录错" />
           </Form.Item>
-          <Form.Item name="operator" label="操作人" rules={[{ required: true, message: '必填' }]}>
-            <Input />
+          <Form.Item name="operator" label="操作人" rules={[{ required: true, message: '必填' }]}><Input /></Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 流转操作 */}
+      <Modal title={ACTION_TEXT[flowAction] || '流转操作'} open={!!flowAction}
+        onCancel={() => setFlowAction('')} onOk={() => void submitFlow()} confirmLoading={flowSaving}>
+        <Alert style={{ marginBottom: 12 }} type="info" showIcon
+          message="每次操作将同步更新当前状态并写入流转历史（可追溯）。" />
+        <Form form={formFlow} labelCol={{ span: 6 }} wrapperCol={{ span: 17 }}>
+          {flowNeedsTeam && (
+            <Form.Item name="to_team_id" label={flowAction === 'OUT_TO_TEAM' ? '目标班组' : '新班组'}
+              rules={[{ required: true, message: '请选择班组' }]}>
+              <Select options={teams
+                .filter((t) => flowAction !== 'HANDOVER' || t.id !== detail?.current_team_id)
+                .map((t) => ({ value: t.id, label: t.name }))}
+                placeholder="班组/内部单位" />
+            </Form.Item>
+          )}
+          {flowNeedsBorrower && (
+            <>
+              <Form.Item name="borrower_id" label="外借方" rules={[{ required: true, message: '请选择外借方' }]}>
+                <Select options={borrowers.map((b) => ({ value: b.id, label: b.name }))} placeholder="外部公司/单位" />
+              </Form.Item>
+              <Form.Item name="expected_return_date" label="预计归还日期">
+                <DatePicker style={{ width: '100%' }} disabledDate={(d) => d.isBefore(dayjs().startOf('day'))} />
+              </Form.Item>
+            </>
+          )}
+          <Form.Item name="remark" label={flowRemarkLabel}
+            rules={flowRemarkRequired ? [{ required: true, message: '请填写报废原因' }] : []}>
+            <Input.TextArea rows={2} />
           </Form.Item>
+          <Form.Item name="operator" label="操作人" rules={[{ required: true, message: '必填' }]}><Input /></Form.Item>
         </Form>
       </Modal>
     </Space>
