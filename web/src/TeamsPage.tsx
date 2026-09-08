@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Card, Form, Input, message, Modal, Space, Switch, Table, Tag } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Button, Card, Form, Input, message, Modal, Popconfirm, Space, Switch, Table, Tag } from 'antd';
+import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
 interface Team { id: number; name: string; department: string; is_active: boolean }
@@ -83,6 +83,16 @@ export default function TeamsPage() {
     }
   }, [load]);
 
+  const removeTeam = useCallback(async (t: Team) => {
+    try {
+      await req(`/api/teams/${t.id}`, { method: 'DELETE' });
+      message.success('班组已删除');
+      void load();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '删除失败');
+    }
+  }, [load]);
+
   const columns: ColumnsType<Team> = [
     { title: '名称', dataIndex: 'name' },
     { title: '部门/说明', dataIndex: 'department', render: (v: string) => v || '-' },
@@ -91,13 +101,21 @@ export default function TeamsPage() {
       render: (v: boolean) => (v ? <Tag color="green">启用</Tag> : <Tag color="red">停用</Tag>),
     },
     {
-      title: '操作', key: 'op', width: 180,
+      title: '操作', key: 'op', width: 260,
       render: (_: unknown, r: Team) => (
         <Space>
           <Button type="link" size="small" onClick={() => openEdit(r)}>编辑</Button>
           <Button type="link" size="small" danger={r.is_active} onClick={() => void toggleActive(r)}>
             {r.is_active ? '停用' : '启用'}
           </Button>
+          <Popconfirm
+            title="删除该班组？"
+            description="仅当班组未被任何设备占用且无历史引用时可删除；否则请改用「停用」以保留历史。"
+            okText="删除" cancelText="取消" okButtonProps={{ danger: true }}
+            onConfirm={() => void removeTeam(r)}
+          >
+            <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
         </Space>
       ),
     },

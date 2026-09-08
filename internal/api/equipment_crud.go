@@ -118,6 +118,12 @@ func writeServiceError(c *gin.Context, err error) {
 		writeError(c, http.StatusConflict, "同名称同型号下该编号已存在，无法保存")
 	case errors.Is(err, service.ErrDuplicateName):
 		writeError(c, http.StatusConflict, "该名称已存在")
+	case errors.Is(err, service.ErrTeamInUse):
+		writeError(c, http.StatusConflict, err.Error())
+	case errors.Is(err, service.ErrTeamReferenced):
+		writeError(c, http.StatusConflict, err.Error())
+	case errors.Is(err, service.ErrCategoryInUse):
+		writeError(c, http.StatusConflict, err.Error())
 	case errors.Is(err, service.ErrNoOpenBorrow):
 		writeError(c, http.StatusConflict, "该设备没有未归还的外借单，无法归还")
 	case errors.Is(err, service.ErrNoScrapAfter):

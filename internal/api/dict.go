@@ -129,3 +129,29 @@ func (s *Server) UpdateTeam(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"id": t.ID, "name": t.Name, "is_active": t.IsActive})
 }
+
+// DeleteTeam DELETE /api/teams/:id 受控删除班组（未被占用/未被历史引用）。
+func (s *Server) DeleteTeam(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	if err := service.DeleteTeam(s.DB, id); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id, "deleted": true})
+}
+
+// DeleteCategory DELETE /api/categories/:id 受控删除类别（未被设备引用）。
+func (s *Server) DeleteCategory(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	if err := service.DeleteCategory(s.DB, id); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id, "deleted": true})
+}

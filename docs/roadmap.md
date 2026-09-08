@@ -188,3 +188,10 @@ equipment-manage/
 - API：`GET /api/teams/equipment`（team/category/status/q），单次查询取数避免 N+1，编号按自然序（数字段数值比较）排序。
 - 复用：设备编号点击 → 既有设备详情抽屉（App 级跨页打开）；Dashboard 新增「各班组设备使用情况」矩阵 + 跳转，与台账/页面统计同源一致（三方一致验证 A班=4）。
 - 测试：Case1-7 全过（班组/类别筛选/关键字/未分配/外借不计入/流转迁移/历史不受影响）+ API 契约测试 + 无头 UI 验收（零 console 错误、编号点击进详情）。
+
+## 14. v1.0.0 功能增量：班组/类别受控删除（2026-09-08，feat commit）
+
+- 班组管理、系统设置-类别字典新增「删除」（Popconfirm 二次确认）。
+- 规则（决策 17）：班组仅当「无设备当前占用 current_team_id」且「无历史流转引用 from/to_team_id」才可物理删除（可清建错空项）；类别仅当「无设备引用 category_id」才可删除；被引用返回 409 并提示改用停用/先调整。
+- API：`DELETE /api/teams/:id`、`DELETE /api/categories/:id`；错误统一 JSON（409/404）。
+- 测试：service 用例（未引用可删/占用拒绝/历史引用拒绝/归还后仍拒绝）+ API 契约（409/200/404）全绿。

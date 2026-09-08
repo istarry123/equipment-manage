@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Card, Form, Input, List, message, Space, Table, Typography } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Form, Input, List, message, Popconfirm, Space, Table, Typography } from 'antd';
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 
 interface Category { id: number; name: string; sort: number }
@@ -51,10 +51,33 @@ export default function SettingsPage() {
     }
   }, [form, load]);
 
+  const removeCategory = useCallback(async (c: Category) => {
+    try {
+      await req(`/api/categories/${c.id}`, { method: 'DELETE' });
+      message.success('类别已删除');
+      void load();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '删除失败');
+    }
+  }, [load]);
+
   const columns: ColumnsType<Category> = [
     { title: '类别', dataIndex: 'name' },
     { title: '排序', dataIndex: 'sort', width: 100 },
     { title: 'ID', dataIndex: 'id', width: 80 },
+    {
+      title: '操作', key: 'op', width: 100,
+      render: (_: unknown, r: Category) => (
+        <Popconfirm
+          title="删除该类别？"
+          description="仅当没有任何设备引用该类别时才可删除；被引用时请先调整设备类别。"
+          okText="删除" cancelText="取消" okButtonProps={{ danger: true }}
+          onConfirm={() => void removeCategory(r)}
+        >
+          <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
+        </Popconfirm>
+      ),
+    },
   ];
 
   return (
@@ -71,7 +94,7 @@ export default function SettingsPage() {
       <Card title="设备类别字典（决策 12：页面可维护）" size="small">
         <Space direction="vertical" style={{ width: '100%' }}>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 4 }}>
-            新增类别后即可在设备录入/筛选中选择；删除请谨慎（类别被设备引用时不可物理删除，本版不提供删除）。
+            新增类别后即可在设备录入/筛选中选择；删除仅限未被任何设备引用的类别（被引用时需先调整设备类别）。
           </Typography.Paragraph>
           <Table rowKey="id" size="small" columns={columns} dataSource={categories} pagination={false} />
           <Form form={form} layout="inline">
