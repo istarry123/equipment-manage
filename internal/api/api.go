@@ -16,18 +16,19 @@ import (
 
 // Server 持有 API 依赖。
 type Server struct {
-	DB      *gorm.DB
-	Version string
+	DB       *gorm.DB
+	Version  string
+	sessions *parseStore
 }
 
 // New 创建 gin 引擎（生产环境默认 Release 模式；DSH_DEBUG=1 时开启调试）。
 func New(db *gorm.DB, version string) *gin.Engine {
-	if strings.EqualFold(envOr("DSH_DEBUG", ""), "1") {
+	if strings.EqualFold(os.Getenv("DSH_DEBUG"), "1") {
 		gin.SetMode(gin.DebugMode)
 	} else {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	s := &Server{DB: db, Version: version}
+	s := &Server{DB: db, Version: version, sessions: newParseStore()}
 
 	r := gin.New()
 	r.Use(gin.LoggerWithWriter(logger.Writer()), gin.Recovery())
@@ -37,6 +38,12 @@ func New(db *gorm.DB, version string) *gin.Engine {
 	{
 		h := &healthHandler{server: s}
 		api.GET("/health", h.Get)
+
+		ih := &importHandler{server: s, store: s.sessions}
+		api.POST("/import/parse", ih.Parse)
+		api.POST("/import/run", ih.Run)
+
+		api.GET("/equipment", s.ListEquipment)
 	}
 
 	// ---- 前端静态资源（SPA） ----

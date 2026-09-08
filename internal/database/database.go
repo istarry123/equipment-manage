@@ -33,7 +33,12 @@ func Open(path string) (*gorm.DB, error) {
 }
 
 // DSN 构造 modernc/sqlite 连接串，并注入关键 PRAGMA。
+// path 支持：文件路径、":memory:"、或 "mem://<名字>"（命名内存库，便于测试隔离）。
 func DSN(path string) string {
+	if strings.HasPrefix(path, "mem://") {
+		name := strings.TrimPrefix(path, "mem://")
+		return "file:mem_" + name + "?mode=memory&cache=shared&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	}
 	if strings.Contains(path, "mode=memory") || path == ":memory:" {
 		return "file::memory:?cache=shared&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 	}
