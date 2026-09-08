@@ -145,3 +145,22 @@ func TestExportAndDashboard(t *testing.T) {
 		t.Fatalf("最近流转异常: %+v", d.RecentFlows)
 	}
 }
+
+// TestDashboardEmptyArrays 回归：空库时 dashboard 各列表须为非 nil 数组（避免前端 .length/白屏）。
+func TestDashboardEmptyArrays(t *testing.T) {
+	db := openDB(t)
+	d, err := DashboardStats(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ByStatus == nil || d.ByCategory == nil || d.ByTeam == nil ||
+		d.RecentFlows == nil || d.CurrentBorrows == nil {
+		t.Fatalf("空库统计列表不得为 nil: %+v", d)
+	}
+	if len(d.ByStatus) != 6 {
+		t.Fatalf("状态分布应含 6 个枚举: %d", len(d.ByStatus))
+	}
+	if len(d.ByCategory) != 0 || len(d.RecentFlows) != 0 {
+		t.Fatalf("空库类别/最近流转应为空数组且非 nil")
+	}
+}
