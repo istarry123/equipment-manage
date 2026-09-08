@@ -11,6 +11,7 @@ import {
   TeamOutlined,
 } from '@ant-design/icons';
 import DashboardPage from './DashboardPage';
+import EquipmentPage from './EquipmentPage';
 import ImportPage from './ImportPage';
 
 const { Header, Sider, Content } = Layout;
@@ -18,7 +19,7 @@ const { Header, Sider, Content } = Layout;
 // 主功能导航：随 Phase 推进逐步开放（禁用项=后续阶段功能）
 const MENU_ITEMS = [
   { key: 'dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
-  { key: 'equipment', icon: <AppstoreOutlined />, label: '设备台账', disabled: true },
+  { key: 'equipment', icon: <AppstoreOutlined />, label: '设备台账' },
   { key: 'flow', icon: <SwapOutlined />, label: '设备流转', disabled: true },
   { key: 'borrow', icon: <ExportOutlined />, label: '外借管理', disabled: true },
   { key: 'team', icon: <TeamOutlined />, label: '班组管理', disabled: true },
@@ -29,6 +30,8 @@ const MENU_ITEMS = [
 
 function renderPage(key: string) {
   switch (key) {
+    case 'equipment':
+      return <EquipmentPage />;
     case 'import':
       return <ImportPage />;
     case 'dashboard':
