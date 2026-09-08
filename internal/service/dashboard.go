@@ -54,6 +54,14 @@ type Dashboard struct {
 	RecentFlows    []FlowLine    `json:"recent_flows"`
 	CurrentBorrows []BorrowLine  `json:"current_borrows"`
 	OverdueCount   int64         `json:"overdue_count"`
+	ByTeamCategory []TeamCatRow  `json:"by_team_category"` // 各班组×类别使用情况（班组设备视图同源）
+}
+
+// TeamCatRow 班组×类别统计行（status=IN_TEAM）。
+type TeamCatRow struct {
+	Team     string `json:"team"`
+	Category string `json:"category"`
+	Count    int64  `json:"count"`
 }
 
 // actionTextMap 动作 → 中文（与 api 层一致的小集合）。
@@ -73,6 +81,7 @@ func DashboardStats(db *gorm.DB) (*Dashboard, error) {
 		ByTeam:         []NameCount{},
 		RecentFlows:    []FlowLine{},
 		CurrentBorrows: []BorrowLine{},
+		ByTeamCategory: []TeamCatRow{},
 	}
 	if err := db.Model(&models.Equipment{}).Count(&d.Total).Error; err != nil {
 		return nil, err
@@ -118,6 +127,21 @@ func DashboardStats(db *gorm.DB) (*Dashboard, error) {
 		teamRows = []NameCount{}
 	}
 	d.ByTeam = teamRows
+	// 各班组×类别矩阵（班组设备视图同源：status=IN_TEAM）
+	var tcRows []TeamCatRow
+	if err := db.Table("equipment").
+		Select("COALESCE(team.name,'') AS team, COALESCE(category.name,'(未分类)') AS category, COUNT(equipment.id) AS count").
+		Joins("JOIN team ON team.id = equipment.current_team_id").
+		Joins("LEFT JOIN category ON category.id = equipment.category_id").
+		Where("equipment.status = ?", models.StatusInTeam).
+		Group("team.name, category.name").
+		Scan(&tcRows).Error; err != nil {
+		return nil, err
+	}
+	if tcRows == nil {
+		tcRows = []TeamCatRow{}
+	}
+	d.ByTeamCategory = tcRows
 	// 最近流转（8 条）
 	type txnRow struct {
 		EquipmentID  uint

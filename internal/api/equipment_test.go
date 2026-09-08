@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"equipment/internal/database"
@@ -14,7 +15,8 @@ import (
 
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := database.Open("mem://api-list")
+	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	db, err := database.Open("mem://api-" + name)
 	if err != nil {
 		t.Fatalf("Open 失败: %v", err)
 	}

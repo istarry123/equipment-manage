@@ -6,6 +6,7 @@ import {
   DashboardOutlined,
   ExportOutlined,
   ImportOutlined,
+  ProfileOutlined,
   SettingOutlined,
   SwapOutlined,
   TeamOutlined,
@@ -17,13 +18,14 @@ import TeamsPage from './TeamsPage';
 import BorrowsPage from './BorrowsPage';
 import BackupPage from './BackupPage';
 import SettingsPage from './SettingsPage';
+import TeamViewPage from './TeamViewPage';
 
 const { Header, Sider, Content } = Layout;
 
-// 主功能导航：随 Phase 推进逐步开放（禁用项=后续阶段功能）
 const MENU_ITEMS = [
   { key: 'dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
   { key: 'equipment', icon: <AppstoreOutlined />, label: '设备台账' },
+  { key: 'teamview', icon: <ProfileOutlined />, label: '班组设备' },
   { key: 'flow', icon: <SwapOutlined />, label: '设备流转' },
   { key: 'borrow', icon: <ExportOutlined />, label: '外借管理' },
   { key: 'team', icon: <TeamOutlined />, label: '班组管理' },
@@ -32,29 +34,45 @@ const MENU_ITEMS = [
   { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 
-function renderPage(key: string) {
-  switch (key) {
-    case 'equipment':
-    case 'flow': // 流转操作入口：在设备详情中按当前状态提供可用动作
-      return <EquipmentPage />;
-    case 'borrow':
-      return <BorrowsPage />;
-    case 'team':
-      return <TeamsPage />;
-    case 'import':
-      return <ImportPage />;
-    case 'backup':
-      return <BackupPage />;
-    case 'settings':
-      return <SettingsPage />;
-    case 'dashboard':
-    default:
-      return <DashboardPage />;
-  }
-}
-
 export default function App() {
   const [active, setActive] = useState('dashboard');
+  // 跨页打开设备详情：由班组设备页点击编号触发，复用设备台账页既有详情抽屉
+  const [detailRequestId, setDetailRequestId] = useState<number | null>(null);
+
+  const goMenu = (key: string) => {
+    setActive(key);
+    if (key !== 'equipment' && key !== 'flow') {
+      setDetailRequestId(null);
+    }
+  };
+
+  const openDeviceDetail = (id: number) => {
+    setDetailRequestId(id);
+    setActive('equipment');
+  };
+
+  const renderPage = () => {
+    switch (active) {
+      case 'equipment':
+      case 'flow': // 流转操作入口：设备详情中按状态提供可用动作
+        return <EquipmentPage requestOpenId={detailRequestId} />;
+      case 'teamview':
+        return <TeamViewPage onOpenDevice={openDeviceDetail} />;
+      case 'borrow':
+        return <BorrowsPage />;
+      case 'team':
+        return <TeamsPage />;
+      case 'import':
+        return <ImportPage />;
+      case 'backup':
+        return <BackupPage />;
+      case 'settings':
+        return <SettingsPage />;
+      case 'dashboard':
+      default:
+        return <DashboardPage onOpenTeamView={() => goMenu('teamview')} />;
+    }
+  };
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -75,11 +93,11 @@ export default function App() {
             mode="inline"
             selectedKeys={[active]}
             items={MENU_ITEMS}
-            onClick={({ key }) => setActive(key)}
+            onClick={({ key }) => goMenu(key)}
             style={{ height: '100%', borderRight: 0 }}
           />
         </Sider>
-        <Content style={{ margin: 16 }}>{renderPage(active)}</Content>
+        <Content style={{ margin: 16 }}>{renderPage()}</Content>
       </Layout>
     </Layout>
   );

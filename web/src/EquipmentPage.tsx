@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -104,7 +104,7 @@ const ACTION_TEXT: Record<string, string> = {
   SCRAP: '报废',
 };
 
-export default function EquipmentPage() {
+export default function EquipmentPage({ requestOpenId }: { requestOpenId?: number | null }) {
   const [q, setQ] = useState('');
   const [fCategory, setFCategory] = useState<number | undefined>();
   const [fStatus, setFStatus] = useState<string | undefined>();
@@ -189,6 +189,15 @@ export default function EquipmentPage() {
       message.error(e instanceof Error ? e.message : '加载详情失败');
     }
   }, [loadTxns]);
+
+  // 跨页请求：班组设备视图点击编号 → 复用本页详情抽屉（同 id 不重复触发）
+  const lastOpenRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (requestOpenId && requestOpenId !== lastOpenRef.current) {
+      lastOpenRef.current = requestOpenId;
+      void openDetail(requestOpenId);
+    }
+  }, [requestOpenId, openDetail]);
 
   const refreshDetail = useCallback(async () => {
     if (!detail) return;

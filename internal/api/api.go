@@ -56,6 +56,7 @@ func New(db *gorm.DB, version string) *gin.Engine {
 		api.GET("/teams", s.ListTeams)
 		api.POST("/teams", s.CreateTeam)
 		api.PUT("/teams/:id", s.UpdateTeam)
+		api.GET("/teams/equipment", s.TeamEquipment)
 
 		api.GET("/borrows", s.ListBorrows)
 		api.POST("/borrows/:id/return", s.ReturnBorrow)

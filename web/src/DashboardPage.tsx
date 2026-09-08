@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Col, Row, Space, Statistic, Table, Tag } from 'antd';
+import { Alert, Button, Card, Col, Row, Space, Statistic, Table, Tag, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as echarts from 'echarts';
@@ -15,9 +15,11 @@ interface BorrowLine {
   borrow_record_id: number; equipment_id: number; equipment_no: string; name: string;
   borrower_name: string; borrow_date: string; expected_return_date: string; overdue_days: number;
 }
+interface TeamCatRow { team: string; category: string; count: number }
 interface Dashboard {
   total: number; by_status: StatusCount[]; by_category: NameCount[];
-  by_team: NameCount[]; recent_flows: FlowLine[]; current_borrows: BorrowLine[]; overdue_count: number;
+  by_team: NameCount[]; recent_flows: FlowLine[]; current_borrows: BorrowLine[];
+  overdue_count: number; by_team_category: TeamCatRow[];
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -45,7 +47,7 @@ function Chart({ option, height = 260 }: { option: Record<string, unknown>; heig
   return <div ref={ref} style={{ height, width: '100%' }} />;
 }
 
-export default function DashboardPage() {
+export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () => void } = {}) {
   const [d, setD] = useState<Dashboard | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -177,8 +179,69 @@ export default function DashboardPage() {
               </Card>
             </Col>
           </Row>
+
+          <TeamCategoryMatrix rows={d.by_team_category ?? []} onOpenTeamView={onOpenTeamView} />
         </>
       )}
     </Space>
+  );
+}
+
+// 各班组设备使用情况（班组 × 类别，合计列与班组设备页/台账同源）
+function TeamCategoryMatrix({
+  rows, onOpenTeamView,
+}: {
+  rows: TeamCatRow[];
+  onOpenTeamView?: () => void;
+}) {
+  if (rows.length === 0) {
+    return (
+      <Card title="各班组设备使用情况" size="small" extra={
+        onOpenTeamView && <Button type="link" onClick={onOpenTeamView}>查看全部班组设备 →</Button>
+      }>
+        <Typography.Text type="secondary">暂无班组设备（可先在班组管理/设备流转中分配）</Typography.Text>
+      </Card>
+    );
+  }
+  const cats: string[] = [];
+  for (const r of rows) {
+    if (!cats.includes(r.category)) cats.push(r.category);
+  }
+  const byTeam = new Map<string, Map<string, number>>();
+  let order: string[] = [];
+  for (const r of rows) {
+    if (!byTeam.has(r.team)) {
+      byTeam.set(r.team, new Map());
+      order.push(r.team);
+    }
+    byTeam.get(r.team)!.set(r.category, r.count);
+  }
+  const colData = order.map((tm) => {
+    const m = byTeam.get(tm)!;
+    let sum = 0;
+    const rec: Record<string, string | number> = { team: tm };
+    for (const c of cats) {
+      rec[c] = m.get(c) ?? 0;
+      sum += m.get(c) ?? 0;
+    }
+    rec.total = sum;
+    return rec;
+  });
+  return (
+    <Card
+      title="各班组设备使用情况"
+      size="small"
+      extra={onOpenTeamView && <Button type="link" onClick={onOpenTeamView}>查看全部班组设备 →</Button>}
+    >
+      <Table
+        rowKey="team" size="small" pagination={false}
+        dataSource={colData}
+        columns={[
+          { title: '班组', dataIndex: 'team', width: 140, fixed: 'left' as const },
+          ...cats.map((c) => ({ title: c, dataIndex: c, align: 'right' as const })),
+          { title: '合计', dataIndex: 'total', align: 'right' as const, render: (v: number) => <b>{v}</b> },
+        ]}
+      />
+    </Card>
   );
 }
