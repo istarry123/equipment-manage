@@ -38,3 +38,7 @@ Thumbs.db
 .gomod/
 .go/
 .gocache/
+
+# 编辑器备份文件
+*~
+*.tmp
