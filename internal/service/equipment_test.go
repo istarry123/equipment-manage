@@ -65,17 +65,25 @@ func TestCreateEquipmentFlow(t *testing.T) {
 	}
 }
 
+// TestCreateDuplicateNo 决策 18：同 (no,name,model) 重复编号 = 多台真机，应放行并分配 seq 1..n。
 func TestCreateDuplicateNo(t *testing.T) {
 	db := openDB(t)
 	cid := catID(t, db, "测试类")
-	in := CreateEquipmentInput{EquipmentNo: no("001"), Name: "验布机", Model: "N1-1", CategoryID: cid, Operator: "张三"}
-	if _, err := CreateEquipment(db, in); err != nil {
-		t.Fatal(err)
+	in := CreateEquipmentInput{EquipmentNo: no("6041"), Name: "平缝机", Model: "M1", CategoryID: cid, Operator: "张三"}
+	eqs := make([]*models.Equipment, 0, 4)
+	for i := 0; i < 4; i++ {
+		eq, err := CreateEquipment(db, in)
+		if err != nil {
+			t.Fatalf("同号第 %d 台应允许创建: %v", i+1, err)
+		}
+		eqs = append(eqs, eq)
 	}
-	if _, err := CreateEquipment(db, in); !errors.Is(err, ErrDuplicate) {
-		t.Fatalf("同名称型号重复编号应拒绝, got %v", err)
+	for i, eq := range eqs {
+		if eq.EquipmentSeq != i+1 {
+			t.Fatalf("seq 应为 %d, got %d", i+1, eq.EquipmentSeq)
+		}
 	}
-	// 不同名称可复用同号（决策 16）
+	// 不同名称可复用同号（各自独立分组）
 	in2 := in
 	in2.Name = "马连机"
 	if _, err := CreateEquipment(db, in2); err != nil {
@@ -117,13 +125,20 @@ func TestCorrectEquipmentWritesAudit(t *testing.T) {
 	if audit.Operator != "张三" || audit.Reason != "导入时录错编号" {
 		t.Fatalf("audit 内容异常: %+v", audit)
 	}
-	// 更正为已存在的同组编号应冲突
+	// 决策 18：同组再更正一台为同号 → 允许，并触发组内 seq 重排为 1..n
 	eq2, err := CreateEquipment(db, CreateEquipmentInput{EquipmentNo: no("777"), Name: "x", Model: "m", CategoryID: cid, Operator: "a"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Correct(db, eq2.ID, CorrectInput{EquipmentNo: no("6061"), Reason: "r", Operator: "b"}); !errors.Is(err, ErrDuplicate) {
-		t.Fatalf("更正为重复编号应拒绝: %v", err)
+	if _, err := Correct(db, eq2.ID, CorrectInput{EquipmentNo: no("6061"), Reason: "合并为同号真机", Operator: "b"}); err != nil {
+		t.Fatalf("同号多台应允许更正: %v", err)
+	}
+	var seqs []int
+	db.Model(&models.Equipment{}).
+		Where("equipment_no = ? AND name = ? AND model = ?", "6061", "x", "m").
+		Order("id ASC").Pluck("equipment_seq", &seqs)
+	if len(seqs) != 2 || seqs[0] != 1 || seqs[1] != 2 {
+		t.Fatalf("同组 seq 应重排为 [1 2], got %v", seqs)
 	}
 }
 

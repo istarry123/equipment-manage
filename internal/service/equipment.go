@@ -14,7 +14,6 @@ import (
 // 公共业务错误（便于 API 映射 HTTP 语义）。
 var (
 	ErrNotFound  = errors.New("记录不存在")
-	ErrDuplicate = errors.New("同名称同型号下该编号已存在")
 	ErrEmptyName = errors.New("设备名称不能为空")
 	ErrOperator  = errors.New("操作人不能为空")
 	ErrReason    = errors.New("受限更正必须填写原因")
@@ -48,9 +47,7 @@ func CreateEquipment(db *gorm.DB, in CreateEquipmentInput) (*models.Equipment, e
 	if err := ensureCategory(db, in.CategoryID); err != nil {
 		return nil, err
 	}
-	if err := checkNoUnique(db, name, model, no, 0); err != nil {
-		return nil, err
-	}
+	// 决策 18：equipment_no 不再唯一；同 (no,name,model) 允许为多台真机，seq 在事务内按组分配。
 
 	now := models.Now()
 	code, err := NextInternalCode(db)
@@ -70,6 +67,11 @@ func CreateEquipment(db *gorm.DB, in CreateEquipmentInput) (*models.Equipment, e
 		UpdatedAt:    now,
 	}
 	err = db.Transaction(func(tx *gorm.DB) error {
+		seq, err := nextSeqInGroup(tx, no, name, model)
+		if err != nil {
+			return err
+		}
+		eq.EquipmentSeq = seq
 		if err := tx.Create(&eq).Error; err != nil {
 			return err
 		}
@@ -107,6 +109,7 @@ func EditBasic(db *gorm.DB, id uint, in EditBasicInput) (*models.Equipment, erro
 		}
 		return nil, err
 	}
+	oldNo, oldName, oldModel := eq.EquipmentNo, eq.Name, eq.Model
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		return nil, ErrEmptyName
@@ -122,6 +125,9 @@ func EditBasic(db *gorm.DB, id uint, in EditBasicInput) (*models.Equipment, erro
 	if err := db.Save(&eq).Error; err != nil {
 		return nil, err
 	}
+	// 名称/型号可能改变所属 seq 组：原组与新组各自重排
+	renumberSeqGroup(db, oldNo, oldName, oldModel)          //nolint:errcheck
+	renumberSeqGroup(db, eq.EquipmentNo, eq.Name, eq.Model) //nolint:errcheck
 	return &eq, nil
 }
 
@@ -151,16 +157,15 @@ func Correct(db *gorm.DB, id uint, in CorrectInput) (*models.Equipment, error) {
 		}
 		return nil, err
 	}
-	old := fmt.Sprintf("编号=%v 名称=%s 型号=%s", eqNo(eq.EquipmentNo), eq.Name, eq.Model)
+	oldNo, oldName, oldModel := eq.EquipmentNo, eq.Name, eq.Model
+	old := fmt.Sprintf("编号=%v 名称=%s 型号=%s", eqNo(oldNo), oldName, oldModel)
 
 	var no *string
 	if in.EquipmentNo != nil && strings.TrimSpace(*in.EquipmentNo) != "" {
 		v := strings.TrimSpace(*in.EquipmentNo)
 		no = &v
 	}
-	if err := checkNoUnique(db, eq.Name, eq.Model, no, eq.ID); err != nil {
-		return nil, err
-	}
+	// 决策 18：不再校验同组编号唯一（同号多台是真机）。
 
 	now := models.Now()
 	err := db.Transaction(func(tx *gorm.DB) error {
@@ -197,6 +202,9 @@ func Correct(db *gorm.DB, id uint, in CorrectInput) (*models.Equipment, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 编号/名称/型号变化后原组与新组各自重排 seq
+	renumberSeqGroup(db, oldNo, oldName, oldModel)          //nolint:errcheck
+	renumberSeqGroup(db, eq.EquipmentNo, eq.Name, eq.Model) //nolint:errcheck
 	return &eq, nil
 }
 
@@ -209,26 +217,6 @@ func NextInternalCode(db *gorm.DB) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("EQ-%06d", max+1), nil
-}
-
-// checkNoUnique 同 name+model 下 equipment_no 唯一（决策 16；排除自身 id）。
-func checkNoUnique(db *gorm.DB, name, model string, no *string, excludeID uint) error {
-	if no == nil {
-		return nil
-	}
-	q := db.Model(&models.Equipment{}).
-		Where("name = ? AND model = ? AND equipment_no = ?", name, model, *no)
-	if excludeID > 0 {
-		q = q.Where("id <> ?", excludeID)
-	}
-	var c int64
-	if err := q.Count(&c).Error; err != nil {
-		return err
-	}
-	if c > 0 {
-		return ErrDuplicate
-	}
-	return nil
 }
 
 func ensureCategory(db *gorm.DB, id *uint) error {

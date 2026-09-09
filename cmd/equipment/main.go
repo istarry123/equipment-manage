@@ -69,13 +69,15 @@ func run() error {
 	}
 	logger.Info("数据库迁移完成: %s", cfg.DBFile)
 
-	// 启动自动备份（决策：程序启动自动备份，保留最近 cfg.BackupKeep 份）
-	if name, err := service.BackupNow(db, cfg.DBFile, cfg.BackupKeep); err != nil {
-		logger.Error("启动自动备份失败: %v", err)
+	// 决策 18：启动时全量重算 equipment_seq（幂等；覆盖存量数据与组内漂移）
+	step("重算 equipment_seq")
+	if err := service.RenumberAllSeq(db); err != nil {
+		logger.Error("equipment_seq 重算失败: %v", err)
 	} else {
-		logger.Info("启动自动备份完成: %s", name)
+		logger.Info("equipment_seq 组内序号重算完成")
 	}
 
+	// 启动自动备份（决策：程序启动自动备份，保留最近 cfg.BackupKeep 份）
 	step("启动自动备份")
 	if name, err := service.BackupNow(db, cfg.DBFile, cfg.BackupKeep); err != nil {
 		logger.Error("启动自动备份失败: %v", err)

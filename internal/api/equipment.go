@@ -7,6 +7,7 @@ import (
 
 	"equipment/internal/logger"
 	"equipment/internal/models"
+	"equipment/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,6 +16,8 @@ import (
 type equipmentItem struct {
 	ID                uint    `json:"id"`
 	EquipmentNo       *string `json:"equipment_no"`
+	EquipmentSeq      int     `json:"equipment_seq"`
+	DisplayNo         string  `json:"display_no"`
 	InternalCode      string  `json:"internal_code"`
 	Name              string  `json:"name"`
 	Model             string  `json:"model"`
@@ -43,12 +46,13 @@ var statusTextMap = map[string]string{
 	models.StatusMaintenance: "维修", models.StatusScrapped: "报废", models.StatusOther: "其他",
 }
 
-// rowEquipment equipment 行（含联查名称）。
+// rowEquipment equipment 行（含联查名称与同组计数）。
 type rowEquipment struct {
 	models.Equipment
 	CategoryName string `gorm:"column:category_name"`
 	TeamName     string `gorm:"column:team_name"`
 	BorrowerName string `gorm:"column:borrower_name"`
+	NoGrpCount   int64  `gorm:"column:no_grp_count"` // 同 (no,name,model) 计数（无编号恒 0）
 }
 
 func toItem(r rowEquipment) equipmentItem {
@@ -60,6 +64,8 @@ func toItem(r rowEquipment) equipmentItem {
 	return equipmentItem{
 		ID:                r.ID,
 		EquipmentNo:       r.EquipmentNo,
+		EquipmentSeq:      r.EquipmentSeq,
+		DisplayNo:         service.DisplayNo(r.EquipmentNo, r.Name, r.Model, r.EquipmentSeq, r.NoGrpCount),
 		InternalCode:      r.InternalCode,
 		Name:              r.Name,
 		Model:             r.Model,
@@ -77,6 +83,13 @@ func toItem(r rowEquipment) equipmentItem {
 		UpdatedAt:         r.UpdatedAt.Format("2006-01-02 15:04:05"),
 	}
 }
+
+// equipmentSelectNoGrp 供列表/详情复用的同组计数表达式。
+const equipmentSelectNoGrp = `CASE WHEN equipment.equipment_no IS NOT NULL
+  THEN (SELECT COUNT(*) FROM equipment e2
+        WHERE e2.equipment_no = equipment.equipment_no
+          AND e2.name = equipment.name AND e2.model = equipment.model)
+  ELSE 0 END AS no_grp_count`
 
 // List GET /api/equipment?q=&category=&status=&team=&offset=&limit=
 func (s *Server) ListEquipment(c *gin.Context) {
@@ -99,7 +112,7 @@ func (s *Server) ListEquipment(c *gin.Context) {
 	}
 
 	q := s.DB.Model(&models.Equipment{}).
-		Select("equipment.*, COALESCE(category.name,'') AS category_name, COALESCE(team.name,'') AS team_name, COALESCE(borrower.name,'') AS borrower_name").
+		Select("equipment.*, COALESCE(category.name,'') AS category_name, COALESCE(team.name,'') AS team_name, COALESCE(borrower.name,'') AS borrower_name, " + equipmentSelectNoGrp).
 		Joins("LEFT JOIN category ON category.id = equipment.category_id").
 		Joins("LEFT JOIN team ON team.id = equipment.current_team_id").
 		Joins("LEFT JOIN borrower ON borrower.id = equipment.current_borrower_id")
@@ -129,7 +142,7 @@ func (s *Server) GetEquipment(c *gin.Context) {
 	}
 	var r rowEquipment
 	err = s.DB.Model(&models.Equipment{}).
-		Select("equipment.*, COALESCE(category.name,'') AS category_name, COALESCE(team.name,'') AS team_name, COALESCE(borrower.name,'') AS borrower_name").
+		Select("equipment.*, COALESCE(category.name,'') AS category_name, COALESCE(team.name,'') AS team_name, COALESCE(borrower.name,'') AS borrower_name, "+equipmentSelectNoGrp).
 		Joins("LEFT JOIN category ON category.id = equipment.category_id").
 		Joins("LEFT JOIN team ON team.id = equipment.current_team_id").
 		Joins("LEFT JOIN borrower ON borrower.id = equipment.current_borrower_id").

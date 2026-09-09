@@ -114,8 +114,6 @@ func writeServiceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrNotFound):
 		writeError(c, http.StatusNotFound, "记录不存在")
-	case errors.Is(err, service.ErrDuplicate):
-		writeError(c, http.StatusConflict, "同名称同型号下该编号已存在，无法保存")
 	case errors.Is(err, service.ErrDuplicateName):
 		writeError(c, http.StatusConflict, "该名称已存在")
 	case errors.Is(err, service.ErrTeamInUse):
