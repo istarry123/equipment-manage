@@ -1,12 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"equipment/internal/database"
 	"equipment/internal/models"
+
+	"github.com/xuri/excelize/v2"
 )
 
 // fileDB 占位说明：备份类测试需要临时工作目录（backup/ 相对 cwd），见各用例。
@@ -112,6 +115,15 @@ func TestExportAndDashboard(t *testing.T) {
 	if err != nil || len(data) == 0 {
 		t.Fatalf("导出失败: %v", err)
 	}
+	// 回归（v1.1 Phase 8）：导出首行应含“显示编号”列头
+	xf, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("读取导出失败: %v", err)
+	}
+	headerRow, _ := xf.GetRows("设备台账")
+	if len(headerRow) == 0 || len(headerRow[0]) == 0 || headerRow[0][0] != "显示编号" {
+		t.Fatalf("导出首列应为“显示编号”: %v", headerRow)
+	}
 	// 统计
 	d, err := DashboardStats(db)
 	if err != nil {
@@ -135,14 +147,32 @@ func TestExportAndDashboard(t *testing.T) {
 	if len(d.ByTeam) != 1 || d.ByTeam[0].Count != 1 {
 		t.Fatalf("班组统计异常: %+v", d.ByTeam)
 	}
+	// 回归（v1.1 Phase 8）：最近流转应带 display_no（无编号 = 型号（n））
+	if len(d.RecentFlows) < 3 {
+		t.Fatalf("最近流转异常: %+v", d.RecentFlows)
+	}
 	hasFlow := false
+	hasDisplay := false
 	for _, f := range d.RecentFlows {
 		if f.Action == models.ActionOutToTeam && f.ToTeamName == "裁剪一组" {
 			hasFlow = true
 		}
+		if f.DisplayNo != "" && f.EquipmentNo == "" {
+			hasDisplay = true // 无编号设备应展示 型号（n）
+		}
 	}
-	if len(d.RecentFlows) < 3 || !hasFlow {
-		t.Fatalf("最近流转异常: %+v", d.RecentFlows)
+	if !hasFlow || !hasDisplay {
+		t.Fatalf("最近流转 display_no/班组 异常: %+v", d.RecentFlows)
+	}
+	// 回归：无编号设备 display 形如 EBK-SA（1）…（Phase8 口径）
+	foundUnDisplay := false
+	for _, f := range d.RecentFlows {
+		if f.DisplayNo == "EBK-SA（1）" || f.DisplayNo == "EBK-SA（2）" {
+			foundUnDisplay = true
+		}
+	}
+	if !foundUnDisplay {
+		t.Fatalf("无编号设备最近流转应显示 EBK-SA（n）: %+v", d.RecentFlows)
 	}
 }
 
