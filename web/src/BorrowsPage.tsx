@@ -8,7 +8,7 @@ import dayjs from 'dayjs';
 
 interface BorrowItem {
   id: number; equipment_id: number;
-  equipment_no: string; name: string; model: string; category: string;
+  equipment_no: string; display_no?: string; name: string; model: string; category: string;
   borrower_id: number; borrower_name: string;
   borrow_date: string; expected_return_date: string; actual_return_date: string;
   status: string; overdue_days: number;
@@ -162,7 +162,14 @@ export default function BorrowsPage() {
   }, [loadBorrowers]);
 
   const columns: ColumnsType<BorrowItem> = [
-    { title: '设备编号', dataIndex: 'equipment_no', width: 110 },
+    {
+      title: '显示编号', dataIndex: 'display_no', width: 150,
+      render: (v: string, r: BorrowItem) => {
+        if (v) return <Typography.Text strong>{v}</Typography.Text>;
+        if (r.equipment_no) return r.equipment_no;
+        return <Typography.Text type="secondary">无编号</Typography.Text>;
+      },
+    },
     { title: '名称', dataIndex: 'name', ellipsis: true },
     { title: '型号', dataIndex: 'model', width: 130, ellipsis: true, render: (v: string) => v || '-' },
     { title: '外借方', dataIndex: 'borrower_name', width: 180, ellipsis: true },

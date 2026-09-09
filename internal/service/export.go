@@ -24,7 +24,8 @@ var exportStatusText = map[string]string{
 }
 
 type exportRow struct {
-	EquipmentNo  string
+	EquipmentNo  *string
+	EquipmentSeq int
 	Name         string
 	Model        string
 	CategoryName string
@@ -35,15 +36,16 @@ type exportRow struct {
 	InternalCode string
 	Remark       string
 	UpdatedAt    models.Time
+	NoGrpCount   int64
 }
 
 // ExportEquipmentXLSX 导出当前台账（关键字/类别/状态/班组筛选与列表一致）。
 func ExportEquipmentXLSX(db *gorm.DB, f ExportFilter) ([]byte, error) {
 	q := db.Table("equipment").
-		Select(`equipment.equipment_no, equipment.name, equipment.model,
+		Select(`equipment.equipment_no, equipment.equipment_seq, equipment.name, equipment.model,
 			COALESCE(category.name,'') AS category_name, equipment.status,
 			COALESCE(team.name,'') AS team_name, COALESCE(borrower.name,'') AS borrower_name,
-			equipment.current_since, equipment.internal_code, equipment.remark, equipment.updated_at`).
+			equipment.current_since, equipment.internal_code, equipment.remark, equipment.updated_at, ` + EquipmentSelectNoGrp).
 		Joins("LEFT JOIN category ON category.id = equipment.category_id").
 		Joins("LEFT JOIN team ON team.id = equipment.current_team_id").
 		Joins("LEFT JOIN borrower ON borrower.id = equipment.current_borrower_id")
@@ -73,10 +75,14 @@ func ExportEquipmentXLSX(db *gorm.DB, f ExportFilter) ([]byte, error) {
 	sheet := "设备台账"
 	x.NewSheet(sheet)
 	_ = x.SetSheetRow(sheet, "A1", &[]any{
-		"设备编号", "名称", "型号", "类别", "状态", "当前位置", "到达时间", "内部码", "备注", "更新时间",
+		"显示编号", "设备编号", "名称", "型号", "类别", "状态", "当前位置", "到达时间", "内部码", "备注", "更新时间",
 	})
 	for i, r := range rows {
-		no := r.EquipmentNo
+		displayNo := DisplayNo(r.EquipmentNo, r.Name, r.Model, r.EquipmentSeq, r.NoGrpCount)
+		no := ""
+		if r.EquipmentNo != nil {
+			no = *r.EquipmentNo
+		}
 		if no == "" {
 			no = "无编号"
 		}
@@ -101,7 +107,7 @@ func ExportEquipmentXLSX(db *gorm.DB, f ExportFilter) ([]byte, error) {
 		}
 		cell, _ := excelize.CoordinatesToCellName(1, i+2)
 		_ = x.SetSheetRow(sheet, cell, &[]any{
-			no, r.Name, r.Model, r.CategoryName, exportStatusText[r.Status], loc, since,
+			displayNo, no, r.Name, r.Model, r.CategoryName, exportStatusText[r.Status], loc, since,
 			r.InternalCode, r.Remark, r.UpdatedAt.Format("2006-01-02 15:04:05"),
 		})
 	}

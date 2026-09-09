@@ -11,6 +11,28 @@ import (
 	"gorm.io/gorm"
 )
 
+// 设备身份展示（决策 18）：供各聚合视图复用。
+// EquipmentSelectNoGrp 同组(no,name,model)计数表达式（有编号恒>=1；无编号恒 0）。
+const EquipmentSelectNoGrp = `CASE WHEN equipment.equipment_no IS NOT NULL
+  THEN (SELECT COUNT(*) FROM equipment e2
+        WHERE e2.equipment_no = equipment.equipment_no
+          AND e2.name = equipment.name AND e2.model = equipment.model)
+  ELSE 0 END AS no_grp_count`
+
+// displayableRow 聚合行需要的展示字段基座（Scan 时由调用方 SELECT 带入）。
+type displayableRow struct {
+	EquipmentNo  *string `gorm:"column:equipment_no"`
+	EquipmentSeq int     `gorm:"column:equipment_seq"`
+	Name         string  `gorm:"column:name"`
+	Model        string  `gorm:"column:model"`
+	NoGrpCount   int64   `gorm:"column:no_grp_count"`
+}
+
+// DisplayNoOf 计算一行的展示编号（供聚合视图填充 DTO）。
+func DisplayNoOf(r displayableRow) string {
+	return DisplayNo(r.EquipmentNo, r.Name, r.Model, r.EquipmentSeq, r.NoGrpCount)
+}
+
 // ---------- 班组设备视图（Team Equipment View） ----------
 // 数据原则（Feature 约束，禁止新增 team_equipment 类关系表）：
 //   - 当前班组 = equipment.current_team_id，当前状态 = equipment.status，类别 = equipment.category_id；
@@ -39,6 +61,8 @@ type TeamViewStats struct {
 type TeamViewDevice struct {
 	ID           uint    `json:"id"`
 	EquipmentNo  *string `json:"equipment_no"`
+	EquipmentSeq int     `json:"equipment_seq"`
+	DisplayNo    string  `json:"display_no"`
 	InternalCode string  `json:"internal_code"`
 	Name         string  `json:"name"`
 	Model        string  `json:"model"`
@@ -74,6 +98,7 @@ type TeamView struct {
 type tvRow struct {
 	ID            uint
 	EquipmentNo   *string
+	EquipmentSeq  int
 	InternalCode  string
 	Name          string
 	Model         string
@@ -83,6 +108,7 @@ type tvRow struct {
 	CurrentTeamID *uint
 	TeamName      string
 	CurrentSince  models.NullTime
+	NoGrpCount    int64
 }
 
 func hasViewFilter(opt TeamViewOptions) bool {
@@ -93,9 +119,9 @@ func hasViewFilter(opt TeamViewOptions) bool {
 // TeamEquipmentView 班组设备视图聚合：一次查询取数（避免 N+1），分组与自然排序在内存完成。
 func TeamEquipmentView(db *gorm.DB, opt TeamViewOptions) (*TeamView, error) {
 	q := db.Table("equipment").
-		Select(`equipment.id, equipment.equipment_no, equipment.internal_code, equipment.name, equipment.model,
+		Select(`equipment.id, equipment.equipment_no, equipment.equipment_seq, equipment.internal_code, equipment.name, equipment.model,
 			COALESCE(category.name,'') AS category, equipment.category_id, equipment.status,
-			equipment.current_team_id, COALESCE(team.name,'') AS team_name, equipment.current_since`).
+			equipment.current_team_id, COALESCE(team.name,'') AS team_name, equipment.current_since, ` + EquipmentSelectNoGrp).
 		Joins("LEFT JOIN category ON category.id = equipment.category_id").
 		Joins("LEFT JOIN team ON team.id = equipment.current_team_id")
 
@@ -148,11 +174,13 @@ func TeamEquipmentView(db *gorm.DB, opt TeamViewOptions) (*TeamView, error) {
 	teamIdx := map[uint]int{}
 	for _, r := range rows {
 		dev := TeamViewDevice{
-			ID: r.ID, EquipmentNo: r.EquipmentNo, InternalCode: r.InternalCode,
-			Name: r.Name, Model: r.Model,
+			ID: r.ID, EquipmentNo: r.EquipmentNo, EquipmentSeq: r.EquipmentSeq,
+			InternalCode: r.InternalCode,
+			Name:         r.Name, Model: r.Model,
 			Category:   orLabel(r.Category),
 			CategoryID: r.CategoryID,
 			Status:     r.Status,
+			DisplayNo:  DisplayNo(r.EquipmentNo, r.Name, r.Model, r.EquipmentSeq, r.NoGrpCount),
 		}
 		if r.CurrentSince.Valid {
 			dev.CurrentSince = r.CurrentSince.Time.Format("2006-01-02 15:04:05")

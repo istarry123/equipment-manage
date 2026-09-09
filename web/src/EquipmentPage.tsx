@@ -29,6 +29,8 @@ interface Borrower { id: number; name: string; contact: string; phone: string; i
 interface EqItem {
   id: number;
   equipment_no: string | null;
+  equipment_seq?: number;
+  display_no?: string;
   internal_code: string;
   name: string;
   model: string;
@@ -66,6 +68,9 @@ const STATUS_OPTIONS = [
 const statusMeta: Record<string, { text: string; color: string }> = Object.fromEntries(
   STATUS_OPTIONS.map((s) => [s.value, { text: s.text, color: s.color }]),
 );
+
+// 展示编号（决策18）：统一取后端 display_no；异常缺省回退 equipment_no。
+const displayNoOf = (e: EqItem): string => e.display_no ?? e.equipment_no ?? '无编号';
 
 const OPERATOR_KEY = 'eq_last_operator';
 const getOperator = () => localStorage.getItem(OPERATOR_KEY) ?? '';
@@ -327,8 +332,8 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
   const columns: ColumnsType<EqItem> = useMemo(
     () => [
       {
-        title: '设备编号', dataIndex: 'equipment_no', width: 120,
-        render: (v: string | null) => v ?? <Typography.Text type="secondary">无编号</Typography.Text>,
+        title: '显示编号', dataIndex: 'display_no', width: 150,
+        render: (_: unknown, r: EqItem) => displayNoOf(r),
       },
       { title: '内部码', dataIndex: 'internal_code', width: 110 },
       { title: '名称', dataIndex: 'name', ellipsis: true },
@@ -414,7 +419,7 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
 
       {/* 详情抽屉 */}
       <Drawer
-        title={detail ? `${detail.name}（${detail.equipment_no ?? '无编号'}）` : '详情'}
+        title={detail ? `${detail.name}（${displayNoOf(detail)}）` : '详情'}
         open={!!detail}
         width={560}
         onClose={() => { setDetail(null); setFlowAction(''); }}
@@ -440,7 +445,8 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
           <>
             <Descriptions column={1} bordered size="small">
               <Descriptions.Item label="内部码">{detail.internal_code}</Descriptions.Item>
-              <Descriptions.Item label="设备编号">{detail.equipment_no ?? '无编号'}</Descriptions.Item>
+              <Descriptions.Item label="显示编号">{displayNoOf(detail)}</Descriptions.Item>
+              {detail.equipment_no && <Descriptions.Item label="原始编号">{detail.equipment_no}</Descriptions.Item>}
               <Descriptions.Item label="名称">{detail.name}</Descriptions.Item>
               <Descriptions.Item label="型号">{detail.model || '-'}</Descriptions.Item>
               <Descriptions.Item label="类别">{detail.category || '-'}</Descriptions.Item>

@@ -9,7 +9,7 @@ interface Team { id: number; name: string; is_active: boolean }
 interface Category { id: number; name: string }
 
 interface TeamViewDevice {
-  id: number; equipment_no: string | null; internal_code: string;
+  id: number; equipment_no: string | null; equipment_seq?: number; display_no?: string; internal_code: string;
   name: string; model: string; category: string; status: string; current_since: string;
 }
 interface CategoryGroup { category: string; count: number; devices: TeamViewDevice[] }
@@ -44,16 +44,18 @@ async function req<T>(url: string): Promise<T> {
   return data as T;
 }
 
+const displayNoOf = (d: TeamViewDevice): string => d.display_no ?? d.equipment_no ?? '无编号';
+
 const columns = (onOpen: (id: number) => void): ColumnsType<TeamViewDevice> => [
   {
-    title: '编号', dataIndex: 'equipment_no', width: 130,
-    render: (v: string | null, r: TeamViewDevice) =>
-      v ? (
+    title: '编号', dataIndex: 'display_no', width: 150,
+    render: (_: unknown, r: TeamViewDevice) =>
+      r.equipment_no ? (
         <Button type="link" style={{ padding: 0, fontWeight: 600 }} onClick={() => onOpen(r.id)}>
-          {v}
+          {displayNoOf(r)}
         </Button>
       ) : (
-        <Typography.Text type="secondary">{r.internal_code}（无编号）</Typography.Text>
+        <Typography.Text type="secondary">{displayNoOf(r)}</Typography.Text>
       ),
   },
   { title: '名称', dataIndex: 'name', ellipsis: true },

@@ -84,12 +84,8 @@ func toItem(r rowEquipment) equipmentItem {
 	}
 }
 
-// equipmentSelectNoGrp 供列表/详情复用的同组计数表达式。
-const equipmentSelectNoGrp = `CASE WHEN equipment.equipment_no IS NOT NULL
-  THEN (SELECT COUNT(*) FROM equipment e2
-        WHERE e2.equipment_no = equipment.equipment_no
-          AND e2.name = equipment.name AND e2.model = equipment.model)
-  ELSE 0 END AS no_grp_count`
+// equipmentSelectNoGrp 供列表/详情复用（同组计数表达式，定义见 service）。
+const equipmentSelectNoGrp = service.EquipmentSelectNoGrp
 
 // List GET /api/equipment?q=&category=&status=&team=&offset=&limit=
 func (s *Server) ListEquipment(c *gin.Context) {
@@ -156,13 +152,22 @@ func (s *Server) GetEquipment(c *gin.Context) {
 }
 
 // equipmentConds 构建共用筛选条件。
+// q 支持 equipment_no/display_no/name/model/internal_code（§三十六）：
+// display_no 形如 “6041（2）”/“JUKI DDL-8700（1）”，剥离（n）后缀后按原始编号/名称/型号匹配。
 func equipmentConds(q, category, status, team string) ([]string, [][]any) {
 	var conds []string
 	var args [][]any
 	if q != "" {
 		like := "%" + q + "%"
-		conds = append(conds, "equipment.equipment_no LIKE ? OR equipment.name LIKE ? OR equipment.model LIKE ? OR equipment.internal_code LIKE ?")
-		args = append(args, []any{like, like, like, like})
+		parts := []string{"equipment.equipment_no LIKE ?", "equipment.name LIKE ?", "equipment.model LIKE ?", "equipment.internal_code LIKE ?"}
+		vals := []any{like, like, like, like}
+		if base := stripDisplaySeq(q); base != "" && base != q {
+			bl := "%" + base + "%"
+			parts = append(parts, "equipment.equipment_no LIKE ?", "equipment.name LIKE ?", "equipment.model LIKE ?")
+			vals = append(vals, bl, bl, bl)
+		}
+		conds = append(conds, strings.Join(parts, " OR "))
+		args = append(args, vals)
 	}
 	if v := parsePositiveInt(category, -1); v > 0 {
 		conds = append(conds, "equipment.category_id = ?")
@@ -177,6 +182,38 @@ func equipmentConds(q, category, status, team string) ([]string, [][]any) {
 		args = append(args, []any{strings.ToUpper(status)})
 	}
 	return conds, args
+}
+
+// stripDisplaySeq 剥离 display_no 末尾的（n）序号（全半角括号均可），返回基础编号/名称。
+func stripDisplaySeq(q string) string {
+	// （2）、（12）、(2)
+	for _, closePat := range []string{"）", ")"} {
+		openPat := "（"
+		if closePat == ")" {
+			openPat = "("
+		}
+		i := strings.LastIndex(q, openPat)
+		j := strings.LastIndex(q, closePat)
+		if i >= 0 && j > i+len(openPat) {
+			mid := q[i+len(openPat) : j]
+			if allDigits(mid) {
+				return strings.TrimSpace(q[:i])
+			}
+		}
+	}
+	return ""
+}
+
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func parsePositiveInt(s string, def int) int {

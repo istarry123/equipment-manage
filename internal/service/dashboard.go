@@ -24,6 +24,7 @@ type StatusCount struct {
 type FlowLine struct {
 	EquipmentID  uint   `json:"equipment_id"`
 	EquipmentNo  string `json:"equipment_no"`
+	DisplayNo    string `json:"display_no"`
 	Name         string `json:"name"`
 	Action       string `json:"action"`
 	ActionText   string `json:"action_text"`
@@ -38,6 +39,7 @@ type BorrowLine struct {
 	BorrowRecordID uint   `json:"borrow_record_id"`
 	EquipmentID    uint   `json:"equipment_id"`
 	EquipmentNo    string `json:"equipment_no"`
+	DisplayNo      string `json:"display_no"`
 	Name           string `json:"name"`
 	BorrowerName   string `json:"borrower_name"`
 	BorrowDate     string `json:"borrow_date"`
@@ -146,7 +148,10 @@ func DashboardStats(db *gorm.DB) (*Dashboard, error) {
 	type txnRow struct {
 		EquipmentID  uint
 		EquipmentNo  *string
+		EquipmentSeq int
 		Name         string
+		Model        string
+		NoGrpCount   int64
 		Action       string
 		ToTeamName   string
 		BorrowerName string
@@ -155,7 +160,8 @@ func DashboardStats(db *gorm.DB) (*Dashboard, error) {
 	}
 	var flRows []txnRow
 	if err := db.Table("flow_record").
-		Select("flow_record.equipment_id, equipment.equipment_no, equipment.name, flow_record.action, " +
+		Select("flow_record.equipment_id, equipment.equipment_no, equipment.equipment_seq, equipment.name, equipment.model, " +
+			EquipmentSelectNoGrp + ", flow_record.action, " +
 			"flow_record.to_team_name, flow_record.borrower_name, flow_record.occurred_at, flow_record.operator").
 		Joins("JOIN equipment ON equipment.id = flow_record.equipment_id").
 		Order("flow_record.occurred_at DESC, flow_record.id DESC").
@@ -168,8 +174,10 @@ func DashboardStats(db *gorm.DB) (*Dashboard, error) {
 			no = *r.EquipmentNo
 		}
 		d.RecentFlows = append(d.RecentFlows, FlowLine{
-			EquipmentID: r.EquipmentID, EquipmentNo: no, Name: r.Name,
-			Action: r.Action, ActionText: flowActionText[r.Action],
+			EquipmentID: r.EquipmentID, EquipmentNo: no,
+			DisplayNo: DisplayNo(r.EquipmentNo, r.Name, r.Model, r.EquipmentSeq, r.NoGrpCount),
+			Name:      r.Name,
+			Action:    r.Action, ActionText: flowActionText[r.Action],
 			ToTeamName: r.ToTeamName, BorrowerName: r.BorrowerName,
 			OccurredAt: r.OccurredAt.Format("01-02 15:04"), Operator: r.Operator,
 		})
@@ -179,14 +187,18 @@ func DashboardStats(db *gorm.DB) (*Dashboard, error) {
 		ID             uint
 		EquipmentID    uint
 		EquipmentNo    *string
+		EquipmentSeq   int
 		EqName         string
+		EqModel        string
+		NoGrpCount     int64
 		BorrowerName   string
 		BorrowDate     models.Time
 		ExpectedReturn models.NullTime
 	}
 	var brRows []brRow
 	if err := db.Table("borrow_record").
-		Select("borrow_record.id, borrow_record.equipment_id, equipment.equipment_no, equipment.name AS eq_name, "+
+		Select("borrow_record.id, borrow_record.equipment_id, equipment.equipment_no, equipment.equipment_seq, equipment.name AS eq_name, "+
+			"equipment.model AS eq_model, "+EquipmentSelectNoGrp+", "+
 			"borrower.name AS borrower_name, borrow_record.borrow_date, borrow_record.expected_return_date").
 		Joins("JOIN equipment ON equipment.id = borrow_record.equipment_id").
 		Joins("JOIN borrower ON borrower.id = borrow_record.borrower_id").
@@ -201,7 +213,9 @@ func DashboardStats(db *gorm.DB) (*Dashboard, error) {
 			no = *r.EquipmentNo
 		}
 		d.CurrentBorrows = append(d.CurrentBorrows, BorrowLine{
-			BorrowRecordID: r.ID, EquipmentID: r.EquipmentID, EquipmentNo: no, Name: r.EqName,
+			BorrowRecordID: r.ID, EquipmentID: r.EquipmentID, EquipmentNo: no,
+			DisplayNo:    DisplayNo(r.EquipmentNo, r.EqName, r.EqModel, r.EquipmentSeq, r.NoGrpCount),
+			Name:         r.EqName,
 			BorrowerName: r.BorrowerName, BorrowDate: r.BorrowDate.Format("01-02"),
 			ExpectedReturn: timeFmtNull(r.ExpectedReturn),
 		})

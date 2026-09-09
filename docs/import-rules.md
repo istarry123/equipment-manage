@@ -129,4 +129,10 @@ Excel 无归还列 → 不能从文件判定"当前哪些设备仍在外"。**�
 - 状态建议（决策18 §十九/§二十）：导入默认全部 IN_STOCK；设备最后一条借出事件**带可靠归还日期（入南库/回库线索）** → 已回库保持 IN_STOCK；**无归还证据** → 「疑似在借」（SUSPECTED，供 Preview 勾选后再置 BORROWED，绝不自动设置、绝不凭空制造 RETURN）；缺日/事件需人工 → REVIEW。
 - 输出 `ParseResult.Derived`（DerivationReport：设备数/疑似数/疑似清单/REVIEW/匹配/未匹配/归还线索计数）。真实文件推导：设备 2147、疑似在借 352、REVIEW 71、未匹配 1（R119 跨块 0518）、归还线索 2（R334/R340 入南库）。
 
+### v1.1 前端 display_no 全面启用（Phase 8，2026-09-09）
+
+- 后端补齐 display_no 下发：设备台账（已含）外，新增 **班组视图**（TeamViewDevice）、**Dashboard**（FlowLine/BorrowLine）、**外借列表**（borrowItem）、**导出**（新增“显示编号”列，保留“设备编号”原始列）；同组计数表达式统一为 `service.EquipmentSelectNoGrp`（api 复用）。
+- 搜索（§三十六）：q 支持 equipment_no/display_no/name/model/internal_code；display_no 形如 `6041（2）` 自动剥离（n）后缀按基础编号/名称/型号匹配。
+- 前端各页统一展示 display_no（台账列表/详情、班组视图、Dashboard、外借、导入结果），列表 rowKey 一律为 equipment.id（已审计无 equipment_no rowKey）；新增/受限更正表单仍输入原始 equipment_no。
+
 **Blockers**：~~W-1/W-2/W-3/W-4/W-5~~ —— **已全部答复（2026-09-08），无阻塞**。W-6…W-15 为非阻塞项，按表中默认处理，可在后续版本按需启用。

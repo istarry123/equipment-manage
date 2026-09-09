@@ -19,6 +19,7 @@ type borrowItem struct {
 	ID                 uint   `json:"id"`
 	EquipmentID        uint   `json:"equipment_id"`
 	EquipmentNo        string `json:"equipment_no"`
+	DisplayNo          string `json:"display_no"`
 	Name               string `json:"name"`
 	Model              string `json:"model"`
 	Category           string `json:"category"`
@@ -49,11 +50,13 @@ func (s *Server) ListBorrows(c *gin.Context) {
 
 	type row struct {
 		models.BorrowRecord
-		EquipmentNo   string `gorm:"column:equipment_no"`
-		EquipmentName string `gorm:"column:equipment_name"`
-		Model         string `gorm:"column:model"`
-		CategoryName  string `gorm:"column:category_name"`
-		BorrowerName  string `gorm:"column:borrower_name"`
+		EquipmentNo   *string `gorm:"column:equipment_no"`
+		EquipmentSeq  int     `gorm:"column:equipment_seq"`
+		EquipmentName string  `gorm:"column:equipment_name"`
+		EqModel       string  `gorm:"column:eq_model"`
+		NoGrpCount    int64   `gorm:"column:no_grp_count"`
+		CategoryName  string  `gorm:"column:category_name"`
+		BorrowerName  string  `gorm:"column:borrower_name"`
 	}
 
 	build := func(mode string) *gorm.DB {
@@ -75,8 +78,9 @@ func (s *Server) ListBorrows(c *gin.Context) {
 		if mode == "count" {
 			return db
 		}
-		return db.Select(`borrow_record.*, COALESCE(equipment.equipment_no,'') AS equipment_no,
-			equipment.name AS equipment_name, COALESCE(equipment.model,'') AS model,
+		return db.Select(`borrow_record.*, equipment.equipment_no AS equipment_no,
+			equipment.equipment_seq AS equipment_seq, equipment.name AS equipment_name,
+			equipment.model AS eq_model, equipment.category_id, ` + service.EquipmentSelectNoGrp + `,
 			COALESCE(category.name,'') AS category_name, borrower.name AS borrower_name`).
 			Order("borrow_record.status ASC, borrow_record.expected_return_date ASC, borrow_record.id DESC")
 	}
@@ -104,13 +108,15 @@ func (s *Server) ListBorrows(c *gin.Context) {
 				}
 			}
 		}
-		no := r.EquipmentNo
-		if no == "" {
-			no = "-"
+		no := ""
+		if r.EquipmentNo != nil {
+			no = *r.EquipmentNo
 		}
+		displayNo := service.DisplayNo(r.EquipmentNo, r.EquipmentName, r.EqModel, r.EquipmentSeq, r.NoGrpCount)
 		items = append(items, borrowItem{
 			ID: r.ID, EquipmentID: r.EquipmentID, EquipmentNo: no,
-			Name: r.EquipmentName, Model: r.Model, Category: r.CategoryName,
+			DisplayNo: displayNo,
+			Name:      r.EquipmentName, Model: r.EqModel, Category: r.CategoryName,
 			BorrowerID: r.BorrowerID, BorrowerName: r.BorrowerName,
 			BorrowDate:         r.BorrowDate.Format("2006-01-02"),
 			ExpectedReturnDate: dateFmt(r.ExpectedReturnDate),

@@ -7,12 +7,12 @@ import * as echarts from 'echarts';
 interface StatusCount { status: string; count: number }
 interface NameCount { name: string; count: number }
 interface FlowLine {
-  equipment_id: number; equipment_no: string; name: string;
+  equipment_id: number; equipment_no: string; display_no?: string; name: string;
   action_text: string; to_team_name: string; borrower_name: string;
   occurred_at: string; operator: string;
 }
 interface BorrowLine {
-  borrow_record_id: number; equipment_id: number; equipment_no: string; name: string;
+  borrow_record_id: number; equipment_id: number; equipment_no: string; display_no?: string; name: string;
   borrower_name: string; borrow_date: string; expected_return_date: string; overdue_days: number;
 }
 interface TeamCatRow { team: string; category: string; count: number }
@@ -96,14 +96,22 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
   });
 
   const flowCols: ColumnsType<FlowLine> = [
-    { title: '设备', key: 'eq', render: (_: unknown, r: FlowLine) => `${r.equipment_no || '无编号'} ${r.name}` },
+    {
+      title: '设备', key: 'eq', render: (_: unknown, r: FlowLine) => (
+        <span>{r.display_no || r.equipment_no || '无编号'} <Typography.Text type="secondary">{r.name}</Typography.Text></span>
+      ),
+    },
     { title: '动作', dataIndex: 'action_text', width: 110 },
     { title: '去向', key: 'to', width: 150, render: (_: unknown, r: FlowLine) => r.to_team_name || r.borrower_name || '-' },
     { title: '时间', dataIndex: 'occurred_at', width: 120 },
     { title: '操作人', dataIndex: 'operator', width: 90 },
   ];
   const borrowCols: ColumnsType<BorrowLine> = [
-    { title: '设备', key: 'eq', render: (_: unknown, r: BorrowLine) => `${r.equipment_no || '无编号'} ${r.name}` },
+    {
+      title: '设备', key: 'eq', render: (_: unknown, r: BorrowLine) => (
+        <span>{r.display_no || r.equipment_no || '无编号'} <Typography.Text type="secondary">{r.name}</Typography.Text></span>
+      ),
+    },
     { title: '外借方', dataIndex: 'borrower_name', width: 170, ellipsis: true },
     { title: '借出', dataIndex: 'borrow_date', width: 80 },
     {

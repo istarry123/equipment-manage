@@ -74,6 +74,7 @@ interface Report {
 interface EqItem {
   id: number;
   equipment_no: string | null;
+  display_no?: string;
   internal_code: string;
   name: string;
   model: string;
@@ -204,7 +205,11 @@ export default function ImportPage() {
 
   const eqColumns: ColumnsType<EqItem> = [
     { title: '内部码', dataIndex: 'internal_code', width: 110 },
-    { title: '设备编号', dataIndex: 'equipment_no', width: 110, render: (v: string | null) => v ?? '-' },
+    {
+      title: '显示编号', dataIndex: 'display_no', width: 150,
+      render: (v: string | undefined, r: EqItem) =>
+        (v || r.equipment_no) ?? <Typography.Text type="secondary">无编号</Typography.Text>,
+    },
     { title: '名称', dataIndex: 'name', ellipsis: true },
     { title: '型号', dataIndex: 'model', width: 130, ellipsis: true },
     { title: '类别', dataIndex: 'category', width: 110 },
