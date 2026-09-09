@@ -195,3 +195,14 @@ equipment-manage/
 - 规则（决策 17）：班组仅当「无设备当前占用 current_team_id」且「无历史流转引用 from/to_team_id」才可物理删除（可清建错空项）；类别仅当「无设备引用 category_id」才可删除；被引用返回 409 并提示改用停用/先调整。
 - API：`DELETE /api/teams/:id`、`DELETE /api/categories/:id`；错误统一 JSON（409/404）。
 - 测试：service 用例（未引用可删/占用拒绝/历史引用拒绝/归还后仍拒绝）+ API 契约（409/200/404）全绿。
+
+## 15. v1.1 决策 18：设备身份与导入重构 完成记录（2026-09-09）
+
+> 本文档 §2 阶段总览/§7–§14 为 v0.x/v1.0 历史记录；决策 18（v1.1）为一次独立的跨阶段重构，权威进度与要点以 `AGENTS.md` 决策 18 + §6 状态为准，此处仅汇总。
+
+- **决策依据**：根目录《设备管理系统 v1.1 数据导入与设备身份重构——最终版 Codex 修改 Prompt.md》（2130 行，用户批准）。执行顺序 Phase 0–13，全部完成并验收通过（go test / go vet / npm build 全绿）。
+- **核心结论**（取代旧 W-3/W-4/决策 16 的编号唯一粒度）：`equipment.id` 唯一身份；`equipment_no` 原样 TEXT（可重复/空/中文）；V003 移除 V002 唯一索引、新增 `equipment_seq`；V004 新增 `import_batch` + 来源列；`display_no` 后端统一计算下发。
+- **导入链路**：F 列设备全集解析（重复编号=多台真机展开，不 BLOCK）→ J 列历史借出事件（144 条：内部 101 + 外部 43，只解析不写库）→ 状态推导（SUSPECTED/REVIEW，绝不自动 BORROWED）→ Preview/Review（REVIEW 门禁 422）→ 单事务导入（IMPORT_INIT + 勾选疑似置 BORROWED）→ 清空重导（先备份）→ Reconciliation 对账（2147==2147 PASS）。
+- **真实文件终验指标**（`设备借出总账.xlsx`）：198 组 / 台账 D=2147 = 编号 1580 + 无编号 567；DB 导入 2147 台全绿；对账 PASS；REVIEW 57 项全部可列出。
+- **版本**：Phase 13 收尾升 **v1.1.0**（后端 + 前端页脚），tag `v1.1.0`（2026-09-09）；发布目录经 `scripts/build-release.ps1` 重建。
+- **后续（目标电脑验收）**：Win10/11 全流程走查、Win7 SP1 实机回归（Chrome109/FF115）、Chrome109 离线包放入 install/；Win7 实机 0xc0000005 问题待用户回传 EQ_STEPLOG。

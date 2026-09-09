@@ -4,6 +4,7 @@
 > 依据：主章程 §7、`AGENTS.md` 决策基线（14 项）、`docs/data-analysis.md`。
 > 存储：SQLite（`equipment.db`），单文件；GORM v2 + 纯 Go 驱动（`modernc.org/sqlite`，CGO 关闭）。
 > 迁移：不使用 AutoMigrate 当唯一手段，采用**版本化迁移**（SQLite `PRAGMA user_version` + 有序 SQL 脚本，启动时在事务内执行）。
+> v1.1（决策 18，2026-09-09）：本文档为 Phase 0 基线描述；身份/导入相关字段已被 v1.1 修订（见 §2.2 增列、§2.9、§6 迁移清单），修订权威记录见 `AGENTS.md` 决策 18 与 `docs/import-rules.md` v1.1 各节。
 
 ---
 
@@ -21,10 +22,10 @@ settings(key/value) → 系统参数
 设计要点（对齐决策基线）：
 
 - **equipment 保存"当前状态快照"**（快速回答 8 问）；**transaction 保存全部历史**；二者分离。
-- **编号身份**：`id` 为主键；`equipment_no` 为外部真实编号（文本），`internal_code` 为系统内部码（`EQ-000001` 式，仅无编号设备生成）。
+- **编号身份（v1.1 决策 18 取代旧 W-3/W-4 结论）**：`equipment.id` 为唯一身份；`equipment_no` 仅外部真实编号标签（可重复/空/中文符号，**不是唯一键**），`internal_code` 为系统内部码（`EQ-xxxxx` 式）；`equipment_seq` = 同组展示序号（非身份）。
 - **名称快照**（决策 14）：transaction 冗余流转当时的班组名/外借方名，杜绝改名导致历史漂移。
-- **编号唯一性**（W-3/W-4 未决前的默认）：建**普通索引**而非全局唯一约束，唯一性校验逻辑放导入/新增服务层并给出可读错误 —— 待用户确认 W-3/W-4 后再决定是否收紧为 UNIQUE。
-- **删除策略**（决策 6 + 决策 17）：班组/类别提供**受控删除**——仅当未被任何当前设备引用且无历史流转引用（班组）时可物理删除（可清掉"建错的空项"）；被引用一律拒绝并提示改用停用；equipment 无删除入口（报废即终态），外借方用 `is_active` 停用。历史流转记录本身禁止删除。
+- **编号展示（v1.1）**：全站/导出统一显示后端计算的 `display_no`（同号多台 `6041（n）`、无编号恒带序号），搜索输入 display_no/基础编号均可命中。
+- **删除策略**（决策 6 + 决策 17）：班组/类别提供**受控删除**——仅当未被任何当前设备引用且无历史流转引用（班组）时可物理删除（可清掉"建错的空项"）；被引用一律拒绝并提示改用停用；equipment 无删除入口（报废即终态），外借方用 `is_active` 停用。历史流转记录本身禁止删除。清空重导（决策 18）为唯一"清空业务数据"入口且必须二次确认 + 自动备份，字典/审计保留。
 
 ---
 
@@ -44,9 +45,12 @@ settings(key/value) → 系统参数
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| id | INTEGER PK | 系统主键（物理身份） |
-| equipment_no | TEXT NULL | 真实设备编号（可空=无编号设备） |
+| id | INTEGER PK | 系统主键（物理身份，v1.1 起为**唯一设备身份**，决策 18） |
+| equipment_no | TEXT NULL | 真实设备编号（原样保存：可重复/为空/含中文符号，**非唯一键**，决策 18） |
+| equipment_seq | INTEGER NOT NULL DEFAULT 0 | 组内展示序号（非身份；分组键见下，V003 迁移） |
 | internal_code | TEXT NOT NULL UNIQUE | 系统内部码：无编号→`EQ-xxxxx`；有编号→可直接用编号或亦生成 EQ 码（取决策：仅无编号生成，有编号=编号） |
+| import_batch_id | INTEGER NULL FK→import_batch | 来源导入批次（可空=手工/历史数据，V004 迁移） |
+| source_key | TEXT NOT NULL DEFAULT '' | 来源定位（如 `R141#N3`，非身份，仅溯源/对账用，V004 迁移） |
 | name | TEXT NOT NULL | 名称（保留原文） |
 | model | TEXT NULL | 型号 |
 | category_id | INTEGER NULL FK→category | 类别（决策 12） |
@@ -58,7 +62,12 @@ settings(key/value) → 系统参数
 | remark | TEXT NULL | |
 | created_at / updated_at | DATETIME | |
 
-索引：`equipment_no`、`status`、`category_id`、`current_team_id`、`current_borrower_id`、`name/model`（配合台账模糊检索）。
+索引：`equipment_no`（V001 普通索引）、`status`、`category_id`、`current_team_id`、`current_borrower_id`、`name`、`import_batch_id`（V004）——均配合台账模糊检索；`equipment_seq` 不建索引（展示序号，分组重算见下）。
+
+v1.1（决策 18）身份与展示说明：
+- **`equipment.id` 是唯一设备身份**；`equipment_no` 仅原始标签（可重复/空/中文符号），严禁作为唯一键；V002 的部分唯一索引已在 V003 移除。
+- **`equipment_seq` 分组键**：有编号 = `equipment_no + name + model`；无编号 = `model`（空则 `name`，再空则"未编号设备"）。组内按 `id` 升序 1..n；`service.RenumberAllSeq` 全量重算（启动/导入/更正后执行）。
+- **`display_no` 不落库，由后端计算下发**（`service.DisplayNo`）：有编号且同组多台 → `6041（n）`，单台 → `6041`；无编号恒带序号 → `型号（n）`→`名称（n）`→`未编号设备（n）`。前端/导出禁止自行拼接。
 
 ### 2.3 team（班组，决策 5/6/14）
 
@@ -143,6 +152,21 @@ settings(key/value) → 系统参数
 | key | TEXT PK | 如 backup_keep_count、port |
 | value | TEXT | |
 
+### 2.9 import_batch（导入批次，v1.1 决策 18 / V004）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | |
+| source_name | TEXT NOT NULL | 源文件名 |
+| source_hash | TEXT NOT NULL UNIQUE | 文件指纹（幂等依据：同文件已成功导入 → 拒绝重复导入） |
+| status | TEXT NOT NULL DEFAULT 'DONE' | DONE |
+| total_rows | INTEGER NOT NULL DEFAULT 0 | 源台账数量 |
+| imported_count / warning_count / error_count | INTEGER NOT NULL DEFAULT 0 | 导入报告计数 |
+| created_at / updated_at | DATETIME | |
+
+- 每台导入设备回写 `import_batch_id` + `source_key`（如 `R141#N3` = 行 141 第 3 个编号 token；`#U2` = 无编号展开第 2 台），支撑 Reconciliation（Excel source_key 全集 ↔ DB 该批次逐台对账）。
+- 清空重导（`service.ClearImportData`）单事务清空 equipment/flow_record/borrow_record/import_batch；**保留** category/team/borrower 字典、settings、audit_log 历史。
+
 ---
 
 ## 3. 外借建模决策的落库映射（决策 1/2/3 复核）
@@ -180,3 +204,8 @@ settings(key/value) → 系统参数
 - `PRAGMA user_version` 记录 schema 版本；`migrations/` 下按序 SQL（V001_init.sql …）。
 - 启动时：读 user_version → 依次执行 > 当前版本的脚本（事务）→ 更新 user_version。
 - v1 首版即包含上述全部表与索引（V001）。后续加字段一律新增 V00x 脚本，不改历史脚本。
+- 迁移清单（当前 user_version = 4）：
+  - **V001_init.sql**：全部基础表与索引；
+  - **V002_equipment_unique_no.sql**：`(name, model, equipment_no)` 部分唯一索引（决策 16 唯一粒度）——**已被 V003 移除**（决策 18 取代）；
+  - **V003_equipment_seq.sql**（v1.1/决策 18）：equipment 新增 `equipment_seq`（NOT NULL DEFAULT 0）；**删除** V002 部分唯一索引（同号多台放行）；保留 V001 的 `equipment_no` 普通索引；
+  - **V004_import_batch.sql**（v1.1/决策 18）：新增 `import_batch` 表（source_hash UNIQUE）+ equipment 新增 `import_batch_id`、`source_key` + `idx_equipment_batch`。

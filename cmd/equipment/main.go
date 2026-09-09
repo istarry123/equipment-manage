@@ -22,7 +22,7 @@ import (
 )
 
 // version 通过 -ldflags 覆盖；默认跟随发布版本。
-var version = "1.0.0"
+var version = "1.1.0"
 
 // step 现场诊断探针：设 EQ_STEPLOG=1 时每步向控制台打印标记，用于定位启动早期崩溃。
 func step(msg string) {

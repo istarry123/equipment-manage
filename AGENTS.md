@@ -33,7 +33,7 @@
 6. Excel（`设备借出总账.xlsx`）只作为**一次性初始化数据源**；正式数据只存 SQLite（`equipment.db`）。
 7. **不猜测**：字段含义、业务规则无法确定时一律标记「待确认」并交用户确认，绝不擅自定夺。
 8. 不引入章程之外的任何技术：无 Docker / PostgreSQL / Redis / K8s / 微服务 / 云服务 / 互联网依赖。
-9. 提交信息遵循 Conventional Commits；阶段版本标签 `v0.1.0-phase0` … `v1.0.0`。
+9. 提交信息遵循 Conventional Commits；阶段版本标签 `v0.1.0-phase0` … `v1.0.0`，决策 18 重构发布标签 `v1.1.0`（2026-09-09，用户确认）。
 10. 每阶段完成输出验收报告并停止，等待用户明确指令再进入下一阶段。
 
 ## 4. 技术栈（已锁定）
@@ -78,7 +78,7 @@
 
 - Git：`main` 分支已初始化；基线提交完成（主章程 + 本治理文件 + 内嵌 Skill + `设备借出总账.xlsx` 入库）。
 - 数据源：`设备借出总账.xlsx` 已在工作区（单 Sheet「设备借出总账」；R2 表头 11 列：类别/设备名称/设备型号/台账数量/财务数量/台账设备编号/时间/公司/台数/借出设备编号/备注；含合并单元格、跨行主块、多行/空格分隔编号）。
-- 进度：**v1.1 重构执行中（决策 18）**：Phase 0(备份/快照 1477/1478) ✅ → Phase 1(V003) ✅ → Phase 2(equipment_seq/display_no 后端) ✅ `18ed98f` → Phase 3(Parser) ✅ `14fd6e6` → Phase 4(Importer) ✅ `49123e8` → Phase 5(Borrow/Flow 历史日期) ✅ `8be0afe` → Phase 6(J 列借出事件解析) ✅ `3f4b0e1` → Phase 7(最终状态推导) ✅ `70762a5` → Phase 8(Frontend display_no) ✅ `92def2a` → Phase 9(Import Preview/Review) ✅ `3b325d3` → Phase 10(真实Excel终验/清空重导) ✅ `b61793d` → Phase 11(Reconciliation 对账) ✅ `ea13029` → **Phase 12(Regression Tests) ✅ 本次**。
+- 进度：**v1.1 重构（决策 18）已全部完成（Phase 0–13）**：Phase 0(备份/快照 1477/1478) ✅ → Phase 1(V003) ✅ → Phase 2(equipment_seq/display_no 后端) ✅ `18ed98f` → Phase 3(Parser) ✅ `14fd6e6` → Phase 4(Importer) ✅ `49123e8` → Phase 5(Borrow/Flow 历史日期) ✅ `8be0afe` → Phase 6(J 列借出事件解析) ✅ `3f4b0e1` → Phase 7(最终状态推导) ✅ `70762a5` → Phase 8(Frontend display_no) ✅ `92def2a` → Phase 9(Import Preview/Review) ✅ `3b325d3` → Phase 10(真实Excel终验/清空重导) ✅ `b61793d` → Phase 11(Reconciliation 对账) ✅ `ea13029` → Phase 12(Regression Tests) ✅ `23bd76c` → **Phase 13(Documentation) ✅ 本次**。
 - v1.1 Phase 3（Parser）要点：F 列逐 token 分类（编号原样保留可中文/重复=多台真机展开不 BLOCK；"无编号"按数量展开；描述文本→无编号+原文备注；无法判断→REVIEW 人工确认前该组不导入，绝不静默丢）；真实 Excel 审计：198 组/D 2147 = 编号 1580 + 无编号 567（含描述 1），组级数量自洽、无 mismatch；重复编号降为 WARN 后真实文件可全量导入 2147 台（原 V3 把平车 670 台误 BLOCK）。
 - v1.1 Phase 4（Importer）要点：V004 迁移新增 `import_batch` 表与 equipment 来源列（import_batch_id/source_key）；导入=单事务（批次→类别→设备行→逐台 IMPORT_INIT→回填批次计数→事务内 RenumberAllSeq→audit）；设备级展开每 token 一台（同号多台真机 seq 1..n）、无编号逐台展开；同文件指纹幂等（ErrBatchImported）、非空库守卫（ErrDBNotEmpty）；真实 Excel 导入 2147 台全绿，batch/seq/source_key 断言通过。
 - v1.1 Phase 5（Borrow/Flow 历史日期）要点（§二十二/二十三）：`FlowRequest`/`Transition` 支持可选 `OccurredAt`（默认今天、不得晚于当前，ErrOccurredFuture）；借出/归还/所有流转的发生时间、borrow_date/actual_return_date、current_since 均按历史日期落库；API 借出（/flow occurred_at）与归还（/borrows/:id/return actual_return_date）透传历史日期；前端借出/归还弹窗新增"发生日期/实际归还日期"（可留空=今天）；service+api 测试覆盖历史借出/归还/未来日期拒绝。无新迁移（occurred_at 等列已存在）。
@@ -89,5 +89,6 @@
 - v1.1 Phase 10（真实 Excel 终验 / 清空重导）要点（决策18⑤ + §四十六）：`POST /api/import/reset`（confirm 二次确认 → 自动备份 → `service.ClearImportData` 单事务清空 equipment/flow_record/borrow_record/import_batch → `IMPORT_RESET` audit；保留字典/settings/audit 历史；空库幂等）；前端 ImportPage 清空重导危险入口；e2e 测试：非空库 reset → parse → REVIEW 全清点 → 全量导入 2147 台。commit `b61793d`。
 - v1.1 Phase 11（Reconciliation 对账）要点（§四十七）：`importer.Reconcile(db,res)` 以 source_hash 关联批次，Excel 可导入(source_key 全集) ↔ DB 该批次设备逐台比对：缺失/多出逐台列出、无编号/同号多台双侧计数、历史借出未匹配；全等 PASS 否则 FAIL；`POST /api/import/reconcile {parse_id}`（run 后保留会话供对账）；前端 ImportPage 导入后对账卡片；真实文件 e2e 2147==2147 PASS。commit `ea13029`。
 - v1.1 Phase 12（Regression Tests）要点：全仓 `go test ./... -count=1`（api/database/importer/service/config 全绿）+ `go vet` + `npm run build` 通过；§四十八 旧逻辑审计（无 equipment_no unique/无 duplicate BLOCK/无 strings.Fields/无 rowKey=equipment_no）；回归关键链路重跑（真实文件导入 2147、REVIEW 门禁、清空重导、对账 PASS、重复编号展开 seq、历史日期、display_no API/班组/外借）；增强 TestExportAndDashboard 断言导出「显示编号」列与 Dashboard display_no（无编号 EBK-SA（n））。
+- v1.1 Phase 13（Documentation）要点：版本号升至 **v1.1.0**（后端 + 前端页脚，用户确认）；`docs/user-guide.md` 重写为 v1.1 语义（显示编号规则、导入五步流程：解析→预览→REVIEW 审阅/疑似在借→导入→对账、清空重导、历史日期、FAQ Q4–Q8）；`README.md` 版本表新增 v1.1.0；`docs/database-design.md` 补 V003/V004 迁移与 import_batch/equipment_seq/display_no；`docs/roadmap.md` 补决策 18 完成记录；AGENTS 进度线收口 Phase 13 → tag `v1.1.0`（本次提交）。
 - 基线（v1.0.0，2026-09-08）：Phase 0–6 完成，tag v1.0.0；发布构建脚本产出 `release/equipment/`；用户手册/FAQ/Win7 浏览器说明就绪；Win7 实机 0xc0000005 问题待用户回传 EQ_STEPLOG。
 - 最终验收待办（目标电脑）：① Win10/11 全流程走查；② Win7 SP1 实机回归（需 Chrome109/FF115）；③ Chrome109 离线包放入 install/；④ v1.1 全流程（状态推导→display_no→Preview/Review→清空重导→对账→回归→文档）验收。
