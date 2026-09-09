@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"equipment/internal/models"
 )
@@ -164,5 +165,95 @@ func TestMastersDuplicate(t *testing.T) {
 	}
 	if _, err := CreateBorrower(db, "泰和", "", ""); !errors.Is(err, ErrDuplicateName) {
 		t.Fatalf("重复外借方应拒绝: %v", err)
+	}
+}
+
+// TestFlowHistoricalDates v1.1 §二十二/§二十三：借出/归还支持历史发生日期；
+// 未填默认今天；不得晚于当前时间。
+func TestFlowHistoricalDates(t *testing.T) {
+	db := openDB(t)
+	cid := catID(t, db, "裁剪设备")
+	b1, err := CreateBorrower(db, "泰和", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eq, err := CreateEquipment(db, CreateEquipmentInput{
+		EquipmentNo: no("6061"), Name: "环形割刀", Model: "EBK-SA", CategoryID: cid, Operator: "张工",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 历史借出：2026-05-10 出借
+	borrowAt := time.Date(2026, 5, 10, 9, 30, 0, 0, time.Local)
+	if _, err := Transition(db, eq.ID, FlowRequest{
+		Action: models.ActionBorrow, Operator: "张工", BorrowerID: &b1.ID, OccurredAt: &borrowAt,
+	}); err != nil {
+		t.Fatalf("历史借出失败: %v", err)
+	}
+	var rec models.BorrowRecord
+	if err := db.Where("equipment_id = ? AND status = ?", eq.ID, models.BorrowOutstanding).First(&rec).Error; err != nil {
+		t.Fatalf("未生成外借单: %v", err)
+	}
+	if got := rec.BorrowDate.Format("2006-01-02 15:04"); got != "2026-05-10 09:30" {
+		t.Fatalf("borrow_date 应为 2026-05-10 09:30，实际 %s", got)
+	}
+	var borrowTxn models.Transaction
+	if err := db.Where("equipment_id = ? AND action = ?", eq.ID, models.ActionBorrow).
+		Order("id DESC").First(&borrowTxn).Error; err != nil {
+		t.Fatal(err)
+	}
+	if borrowTxn.OccurredAt.Format("2006-01-02") != "2026-05-10" {
+		t.Fatalf("流转 occurred_at 应为 2026-05-10，实际 %s", borrowTxn.OccurredAt.Format("2006-01-02"))
+	}
+	// current_since 口径（决策 8）取发生时间
+	var cur models.Equipment
+	if err := db.First(&cur, eq.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !cur.CurrentSince.Valid || cur.CurrentSince.Time.Format("2006-01-02") != "2026-05-10" {
+		t.Fatalf("current_since 应为历史借出日 2026-05-10，实际 %v", cur.CurrentSince)
+	}
+
+	// 未来日期拒绝（§二十二：不得晚于当前时间）——用另一台在库设备验证
+	eq2, err := CreateEquipment(db, CreateEquipmentInput{
+		EquipmentNo: no("6062"), Name: "拉布机", Model: "CM-01", CategoryID: cid, Operator: "张工",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(24 * time.Hour)
+	if _, err := Transition(db, eq2.ID, FlowRequest{
+		Action: models.ActionBorrow, Operator: "张工", BorrowerID: &b1.ID, OccurredAt: &future,
+	}); !errors.Is(err, ErrOccurredFuture) {
+		t.Fatalf("未来日期应拒绝，实际 %v", err)
+	}
+
+	// 历史归还：2026-06-01 归还
+	returnAt := time.Date(2026, 6, 1, 17, 0, 0, 0, time.Local)
+	if _, err := Transition(db, eq.ID, FlowRequest{
+		Action: models.ActionReturnBorrow, Operator: "张工", OccurredAt: &returnAt,
+	}); err != nil {
+		t.Fatalf("历史归还失败: %v", err)
+	}
+	if err := db.First(&rec, rec.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !rec.ActualReturnDate.Valid || rec.ActualReturnDate.Time.Format("2006-01-02") != "2026-06-01" {
+		t.Fatalf("实际归还日期应为 2026-06-01，实际 %v", rec.ActualReturnDate)
+	}
+	// 无 OccurredAt → 默认今天
+	if _, err := Transition(db, eq.ID, FlowRequest{
+		Action: models.ActionToMaintenance, Operator: "张工",
+	}); err != nil {
+		t.Fatalf("送修失败: %v", err)
+	}
+	var mt models.Transaction
+	if err := db.Where("equipment_id = ? AND action = ?", eq.ID, models.ActionToMaintenance).
+		Order("id DESC").First(&mt).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got := mt.OccurredAt.Time.Truncate(time.Second); got.Sub(time.Now()).Abs() > time.Minute {
+		t.Fatalf("未指定日期时应默认今天，实际 %s", mt.OccurredAt.Format("2006-01-02 15:04:05"))
 	}
 }

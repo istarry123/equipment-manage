@@ -287,6 +287,7 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
         to_team_id: v.to_team_id ?? null,
         borrower_id: v.borrower_id ?? null,
         expected_return_date: v.expected_return_date ? v.expected_return_date.format('YYYY-MM-DD') : null,
+        occurred_at: v.occurred_at ? v.occurred_at.format('YYYY-MM-DD') : null,
         remark: v.remark ?? '',
       };
       await req(`/api/equipment/${detail.id}/flow`, { method: 'POST', body: JSON.stringify(body) });
@@ -549,6 +550,10 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
           <Form.Item name="remark" label={flowRemarkLabel}
             rules={flowRemarkRequired ? [{ required: true, message: '请填写报废原因' }] : []}>
             <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="occurred_at" label="发生日期"
+            extra="留空=今天（历史补录可指定过去日期）">
+            <DatePicker style={{ width: '100%' }} disabledDate={(d) => d.isAfter(dayjs().startOf('day'))} />
           </Form.Item>
           <Form.Item name="operator" label="操作人" rules={[{ required: true, message: '必填' }]}><Input /></Form.Item>
         </Form>

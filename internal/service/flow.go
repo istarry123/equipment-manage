@@ -23,15 +23,18 @@ var (
 	ErrNoOpenBorrow      = errors.New("该设备没有未归还的外借单，无法归还")
 	ErrScrapReason       = errors.New("报废必须填写原因")
 	ErrNoScrapAfter      = errors.New("设备已报废（终态），不可再流转")
+	ErrOccurredFuture    = errors.New("流转日期不能晚于当前时间")
 )
 
 // FlowRequest 一次流转的入参（字段已类型化，由 API 层解析）。
+// v1.1 §二十二/§二十三：OccurredAt 可选——历史补录可指定发生时间（默认今天，不得晚于当前）。
 type FlowRequest struct {
 	Action             string
 	Operator           string
 	ToTeamID           *uint
 	BorrowerID         *uint
 	ExpectedReturnDate *time.Time
+	OccurredAt         *time.Time
 	Remark             string
 }
 
@@ -147,6 +150,14 @@ func Transition(db *gorm.DB, id uint, in FlowRequest) (*models.Equipment, error)
 	}
 
 	now := time.Now()
+	// v1.1 §二十二：允许补录历史发生时间（默认今天；不得晚于当前时间）。
+	occurredAt := now
+	if in.OccurredAt != nil {
+		if in.OccurredAt.After(now) {
+			return nil, ErrOccurredFuture
+		}
+		occurredAt = *in.OccurredAt
+	}
 	err := db.Transaction(func(tx *gorm.DB) error {
 		// 外借单联动
 		var borrowRecID *uint
@@ -154,7 +165,7 @@ func Transition(db *gorm.DB, id uint, in FlowRequest) (*models.Equipment, error)
 			rec := models.BorrowRecord{
 				EquipmentID: eq.ID,
 				BorrowerID:  *plan.toBorrowerID,
-				BorrowDate:  models.FromTime(now),
+				BorrowDate:  models.FromTime(occurredAt),
 				Status:      models.BorrowOutstanding,
 				CreatedAt:   models.FromTime(now),
 				UpdatedAt:   models.FromTime(now),
@@ -172,7 +183,7 @@ func Transition(db *gorm.DB, id uint, in FlowRequest) (*models.Equipment, error)
 			if err != nil {
 				return err
 			}
-			rec.ActualReturnDate = models.ValidTime(now)
+			rec.ActualReturnDate = models.ValidTime(occurredAt)
 			rec.Status = models.BorrowReturned
 			rec.UpdatedAt = models.FromTime(now)
 			if err := tx.Save(&rec).Error; err != nil {
@@ -197,7 +208,7 @@ func Transition(db *gorm.DB, id uint, in FlowRequest) (*models.Equipment, error)
 		}
 		eq.CurrentBorrowerID = curBorrower
 		eq.CurrentBorrowRecordID = curBorrowRec
-		eq.CurrentSince = models.ValidTime(now)
+		eq.CurrentSince = models.ValidTime(occurredAt)
 		eq.UpdatedAt = models.FromTime(now)
 		if err := tx.Save(&eq).Error; err != nil {
 			return err
@@ -216,7 +227,7 @@ func Transition(db *gorm.DB, id uint, in FlowRequest) (*models.Equipment, error)
 			BorrowerID:     plan.toBorrowerID,
 			BorrowerName:   plan.borrowerName,
 			BorrowRecordID: borrowRecID,
-			OccurredAt:     models.FromTime(now),
+			OccurredAt:     models.FromTime(occurredAt),
 			Operator:       in.Operator,
 			Remark:         strings.TrimSpace(plan.remark),
 			CreatedAt:      models.FromTime(now),

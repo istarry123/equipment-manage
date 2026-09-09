@@ -130,17 +130,24 @@ func dateFmt(n models.NullTime) string {
 }
 
 // ReturnBorrow POST /api/borrows/:id/return（决策 3：归一一律回仓库）
+// v1.1 §二十三：可指定实际归还历史日期（默认今天，不得晚于当前）。
 func (s *Server) ReturnBorrow(c *gin.Context) {
 	id, ok := parseID(c)
 	if !ok {
 		return
 	}
 	var body struct {
-		Operator string `json:"operator"`
-		Remark   string `json:"remark"`
+		Operator         string  `json:"operator"`
+		Remark           string  `json:"remark"`
+		ActualReturnDate *string `json:"actual_return_date"` // 可选历史日期
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		writeError(c, http.StatusBadRequest, "请求参数错误")
+		return
+	}
+	occ, err := optionalTime(body.ActualReturnDate, "实际归还日期格式错误（示例 2026-09-01）")
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	var rec models.BorrowRecord
@@ -162,7 +169,8 @@ func (s *Server) ReturnBorrow(c *gin.Context) {
 		return
 	}
 	if _, err := service.Transition(s.DB, eq.ID, service.FlowRequest{
-		Action: models.ActionReturnBorrow, Operator: body.Operator, Remark: body.Remark,
+		Action: models.ActionReturnBorrow, Operator: body.Operator,
+		OccurredAt: occ, Remark: body.Remark,
 	}); err != nil {
 		writeServiceError(c, err)
 		return

@@ -86,7 +86,11 @@ export default function BorrowsPage() {
     try {
       await req(`/api/borrows/${ret.id}/return`, {
         method: 'POST',
-        body: JSON.stringify({ operator: v.operator, remark: v.remark ?? '' }),
+        body: JSON.stringify({
+          operator: v.operator,
+          remark: v.remark ?? '',
+          actual_return_date: v.actual_return_date ? v.actual_return_date.format('YYYY-MM-DD') : null,
+        }),
       });
       localStorage.setItem(OPERATOR_KEY, v.operator);
       message.success('归还完成（设备回仓库）');
@@ -266,6 +270,10 @@ export default function BorrowsPage() {
         onCancel={() => setRet(null)} onOk={() => void doReturn()} confirmLoading={acting}>
         <Form form={formRet} labelCol={{ span: 6 }} wrapperCol={{ span: 17 }}>
           <Form.Item label="外借方" ><span>{ret?.borrower_name}</span></Form.Item>
+          <Form.Item name="actual_return_date" label="实际归还日期"
+            extra="留空=今天（历史补录可指定过去日期）">
+            <DatePicker style={{ width: '100%' }} disabledDate={(d) => d.isAfter(dayjs().startOf('day'))} />
+          </Form.Item>
           <Form.Item name="operator" label="操作人" rules={[{ required: true, message: '必填' }]}><Input /></Form.Item>
           <Form.Item name="remark" label="备注"><Input.TextArea rows={2} /></Form.Item>
         </Form>

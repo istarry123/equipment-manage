@@ -133,7 +133,8 @@ func writeServiceError(c *gin.Context, err error) {
 		errors.Is(err, service.ErrTeamSame),
 		errors.Is(err, service.ErrBorrowerRequired),
 		errors.Is(err, service.ErrBorrowerInactive),
-		errors.Is(err, service.ErrScrapReason):
+		errors.Is(err, service.ErrScrapReason),
+		errors.Is(err, service.ErrOccurredFuture):
 		writeError(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrEmptyName):
 		writeError(c, http.StatusBadRequest, "设备名称不能为空")

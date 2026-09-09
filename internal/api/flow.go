@@ -47,6 +47,7 @@ type flowRequest struct {
 	ToTeamID           *uint   `json:"to_team_id"`
 	BorrowerID         *uint   `json:"borrower_id"`
 	ExpectedReturnDate *string `json:"expected_return_date"`
+	OccurredAt         *string `json:"occurred_at"` // 可选：历史补录发生时间（默认今天，不得晚于当前）
 	Remark             string  `json:"remark"`
 }
 
@@ -74,10 +75,15 @@ func (s *Server) DoFlow(c *gin.Context) {
 		}
 		exp = &t
 	}
+	occ, err := optionalTime(body.OccurredAt, "流转日期格式错误（示例 2026-09-01 或 2026-09-01 10:00:00）")
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	eq, err := service.Transition(s.DB, id, service.FlowRequest{
 		Action: body.Action, Operator: body.Operator,
 		ToTeamID: body.ToTeamID, BorrowerID: body.BorrowerID,
-		ExpectedReturnDate: exp, Remark: body.Remark,
+		ExpectedReturnDate: exp, OccurredAt: occ, Remark: body.Remark,
 	})
 	if err != nil {
 		writeServiceError(c, err)
@@ -89,6 +95,23 @@ func (s *Server) DoFlow(c *gin.Context) {
 		"current_since": timeFmt(eq.CurrentSince),
 	})
 }
+
+// optionalTime 解析可选时间字段：空值 → nil；否则解析常见格式（含日期/日期+时间）。
+func optionalTime(v *string, errMsg string) (*time.Time, error) {
+	if v == nil || strings.TrimSpace(*v) == "" {
+		return nil, nil
+	}
+	t, err := parseTime(*v)
+	if err != nil {
+		return nil, &paramError{msg: errMsg}
+	}
+	return &t, nil
+}
+
+// paramError 简单的参数错误（携带可直接展示的消息）。
+type paramError struct{ msg string }
+
+func (e *paramError) Error() string { return e.msg }
 
 // parseTime 解析常见日期格式。
 func parseTime(v string) (time.Time, error) {
