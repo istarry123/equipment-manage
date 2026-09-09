@@ -135,4 +135,12 @@ Excel 无归还列 → 不能从文件判定"当前哪些设备仍在外"。**�
 - 搜索（§三十六）：q 支持 equipment_no/display_no/name/model/internal_code；display_no 形如 `6041（2）` 自动剥离（n）后缀按基础编号/名称/型号匹配。
 - 前端各页统一展示 display_no（台账列表/详情、班组视图、Dashboard、外借、导入结果），列表 rowKey 一律为 equipment.id（已审计无 equipment_no rowKey）；新增/受限更正表单仍输入原始 equipment_no。
 
+### v1.1 Import Preview / Review（Phase 9，2026-09-09）
+
+- Parse 响应升级：摘要新增 历史借出事件 / 内部调拨事件 / 疑似在借 / REVIEW 条目；preview 新增 **设备级行**（display_no、source_key、OK，§三十二）、**疑似在借候选**（§三十三/决策18③）、**REVIEW 项清单**。
+- 疑似在借候选 = 推导 SUSPECTED 且为**外部公司**（含「双发」的内部单位事件作为内部调拨历史展示，不入勾选）；**组内同号多台无法定位** → 转 REVIEW，绝不猜测哪一台。
+- REVIEW 门禁（§三十三）：REVIEW 未逐条确认 → `POST /api/import/run` 返回 422 拒绝。
+- `ImportWithOptions`：用户勾选「当前仍外借」的设备在**同一事务**内置 BORROWED，建 borrower 字典（复用/新建）+ borrow_record(OUTSTANDING，borrow_date=最近借出日期)+ BORROW flow；未勾选保持 IN_STOCK。Report 增 `borrowed_now`。
+- 真实文件 Preview：外部疑似 119、REVIEW 57、事件 144（内部 101+外部 43）。
+
 **Blockers**：~~W-1/W-2/W-3/W-4/W-5~~ —— **已全部答复（2026-09-08），无阻塞**。W-6…W-15 为非阻塞项，按表中默认处理，可在后续版本按需启用。

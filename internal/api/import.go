@@ -87,19 +87,23 @@ type importHandler struct {
 
 // summary 解析预览摘要（供前端第一步展示）。
 type importSummary struct {
-	Filename    string `json:"filename"`
-	Sheet       string `json:"sheet"`
-	TotalD      int    `json:"total_d"`      // 源台账数量
-	Groups      int    `json:"groups"`       // 分组数
-	OKGroups    int    `json:"ok_groups"`    // 可导入分组
-	BlockGroups int    `json:"block_groups"` // BLOCK 分组
-	OKDevices   int    `json:"ok_devices"`   // 可导入台数
-	BlockDevs   int    `json:"block_devs"`   // 被阻塞台数
-	Blocks      int    `json:"blocks"`       // BLOCK 级问题条数
-	Warnings    int    `json:"warnings"`     // WARN 级问题条数
-	Reviews     int    `json:"reviews"`      // REVIEW 级问题条数（需人工确认）
-	Duplicates  int    `json:"duplicates"`   // 重复编号多录次数（同号多台真机，展开导入）
-	Unnumbered  int    `json:"unnumbered"`   // 可导入中的无编号台数
+	Filename       string `json:"filename"`
+	Sheet          string `json:"sheet"`
+	TotalD         int    `json:"total_d"`         // 源台账数量
+	Groups         int    `json:"groups"`          // 分组数
+	OKGroups       int    `json:"ok_groups"`       // 可导入分组
+	BlockGroups    int    `json:"block_groups"`    // BLOCK 分组
+	OKDevices      int    `json:"ok_devices"`      // 可导入台数
+	BlockDevs      int    `json:"block_devs"`      // 被阻塞台数
+	Blocks         int    `json:"blocks"`          // BLOCK 级问题条数
+	Warnings       int    `json:"warnings"`        // WARN 级问题条数
+	Reviews        int    `json:"reviews"`         // REVIEW 级问题条数（需人工确认）
+	Duplicates     int    `json:"duplicates"`      // 重复编号多录次数（同号多台真机，展开导入）
+	Unnumbered     int    `json:"unnumbered"`      // 可导入中的无编号台数
+	BorrowEvents   int    `json:"borrow_events"`   // J 列历史借出事件总数（§三十一）
+	InternalEvents int    `json:"internal_events"` // 内部单位（双发系）调拨历史事件数
+	Suspected      int    `json:"suspected"`       // 疑似在借候选（外部公司，可勾选）
+	ReviewItems    int    `json:"review_items"`    // REVIEW 需人工确认条目数（§三十三）
 }
 
 // Parse POST /api/import/parse（multipart 字段 file）：上传 → 解析 → 预览。
@@ -189,6 +193,12 @@ func buildSummary(res *importer.ParseResult) importSummary {
 			s.Warnings++
 		}
 	}
+	// Preview/Review 汇总（Phase 9）
+	_, suspected, reviews, borrowEv, internalEv := importer.BuildReviewView(res)
+	s.Suspected = len(suspected)
+	s.ReviewItems = len(reviews)
+	s.BorrowEvents = borrowEv
+	s.InternalEvents = internalEv
 	return s
 }
 
@@ -233,7 +243,50 @@ func buildPreview(res *importer.ParseResult) gin.H {
 			"row": v.Row, "code": v.Code, "level": v.Level, "group": v.Group, "message": v.Message,
 		})
 	}
-	return gin.H{"groups": gs, "issues": is}
+	// Phase 9：设备级预览 + 疑似在借候选 + REVIEW 项
+	devices, suspected, reviews, _, _ := importer.BuildReviewView(res)
+	const previewDeviceMax = 100
+	dvs := make([]gin.H, 0, minInt(len(devices), previewDeviceMax))
+	for i, d := range devices {
+		if i >= previewDeviceMax {
+			break
+		}
+		no := ""
+		if d.No != nil {
+			no = *d.No
+		}
+		dvs = append(dvs, gin.H{
+			"source_key": d.SourceKey, "display_no": d.DisplayNo, "equipment_no": no,
+			"name": d.Name, "model": d.Model, "category": d.Category,
+			"unnumbered": d.Unnumbered, "ok": d.OK, "group_rows": d.GroupRows,
+		})
+	}
+	revs := make([]gin.H, 0, len(reviews))
+	for _, r := range reviews {
+		revs = append(revs, gin.H{
+			"key": r.Key, "level": r.Level, "group": r.Group, "row": r.Row,
+			"message": r.Message, "raw": r.Raw, "suggestion": r.Suggestion,
+		})
+	}
+	sus := make([]gin.H, 0, len(suspected))
+	for _, s := range suspected {
+		sus = append(sus, gin.H{
+			"source_key": s.SourceKey, "display_no": s.DisplayNo, "name": s.Name, "model": s.Model,
+			"company": s.Company, "borrow_date": s.BorrowDate, "row": s.Row, "remark": s.Remark,
+		})
+	}
+	return gin.H{
+		"groups": gs, "issues": is,
+		"devices": dvs, "device_total": len(devices),
+		"suspected": sus, "reviews": revs,
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func joinLimit(s []string, n int) string {
@@ -244,9 +297,13 @@ func joinLimit(s []string, n int) string {
 }
 
 // Run POST /api/import/run：确认并执行导入（单事务）。
+// body: { parse_id, confirmed_suspects: [source_key...], acknowledged_reviews: [review_key...] }
+// §三十三：REVIEW 项未全部确认 → 拒绝导入（返回 422 及未确认清单）。
 func (h *importHandler) Run(c *gin.Context) {
 	var body struct {
-		ParseID string `json:"parse_id"`
+		ParseID            string   `json:"parse_id"`
+		ConfirmedSuspects  []string `json:"confirmed_suspects"`
+		AcknowledgedReview []string `json:"acknowledged_reviews"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || body.ParseID == "" {
 		writeError(c, http.StatusBadRequest, "缺少 parse_id")
@@ -257,7 +314,28 @@ func (h *importHandler) Run(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "解析会话不存在或已过期，请重新上传")
 		return
 	}
-	report, err := importer.Import(h.server.DB, sess.res)
+	// REVIEW 门禁（§三十三）
+	_, _, reviews, _, _ := importer.BuildReviewView(sess.res)
+	if len(reviews) > 0 {
+		ack := map[string]bool{}
+		for _, k := range body.AcknowledgedReview {
+			ack[k] = true
+		}
+		var pending []string
+		for _, r := range reviews {
+			if !ack[r.Key] {
+				pending = append(pending, r.Key)
+			}
+		}
+		if len(pending) > 0 {
+			writeError(c, http.StatusUnprocessableEntity,
+				fmt.Sprintf("仍有 %d 项需人工确认（REVIEW）未处理，请逐项确认后再导入", len(pending)))
+			return
+		}
+	}
+	report, err := importer.ImportWithOptions(h.server.DB, sess.res, importer.ImportOptions{
+		ConfirmedSuspects: body.ConfirmedSuspects,
+	})
 	if err != nil {
 		if errors.Is(err, importer.ErrDBNotEmpty) || errors.Is(err, importer.ErrBatchImported) {
 			writeError(c, http.StatusConflict, err.Error())

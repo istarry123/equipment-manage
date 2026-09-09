@@ -31,6 +31,16 @@ func SeqGroupLabel(no *string, name, model string) (string, bool) {
 	return unnumberedFallback, false
 }
 
+// SeqGroupKey 返回某设备所属 seq 分组键（供预览展开/全量重算保持一致）：
+// 有编号 = N|编号\0名称\0型号；无编号 = U|组标签（model→name→未编号设备）。
+func SeqGroupKey(no *string, name, model string) string {
+	label, numbered := SeqGroupLabel(no, name, model)
+	if numbered {
+		return "N|" + label + "\x00" + strings.TrimSpace(name) + "\x00" + strings.TrimSpace(model)
+	}
+	return "U|" + label
+}
+
 // countSeqGroup 组内设备数（不含报废则含：报废设备也保留序号归属，避免组号漂移）。
 func countSeqGroup(db *gorm.DB, no *string, name, model string) (int64, error) {
 	label, numbered := SeqGroupLabel(no, name, model)
@@ -103,15 +113,8 @@ func RenumberAllSeq(db *gorm.DB) error {
 	}
 	order := []string{}
 	groups := map[string]*grp{}
-	keyFor := func(r row) string {
-		label, numbered := SeqGroupLabel(r.EquipmentNo, r.Name, r.Model)
-		if numbered {
-			return "N|" + label + "\x00" + r.Name + "\x00" + r.Model
-		}
-		return "U|" + label
-	}
 	for _, r := range rows {
-		k := keyFor(r)
+		k := SeqGroupKey(r.EquipmentNo, r.Name, r.Model)
 		g, ok := groups[k]
 		if !ok {
 			g = &grp{}

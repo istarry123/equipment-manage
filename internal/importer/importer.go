@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"equipment/internal/models"
@@ -26,6 +27,7 @@ type ImportReport struct {
 	Warnings     int      `json:"warnings"`       // WARN 级问题数
 	Reviews      int      `json:"reviews"`        // REVIEW 级问题数（需人工确认）
 	Unnumbered   int      `json:"unnumbered"`     // 导入的无编号台数
+	BorrowedNow  int      `json:"borrowed_now"`   // 用户勾选确认“当前仍借出”并置 BORROWED 的台数
 	Categories   []string `json:"categories"`
 	InternalCode string   `json:"internal_code"` // 生成的 EQ 内部码区间
 	Time         string   `json:"time"`
@@ -37,10 +39,20 @@ var ErrDBNotEmpty = errors.New("数据库已存在设备数据：本功能仅支
 // ErrBatchImported 表示同一文件（source hash 相同）已导入过（§二十六：幂等）。
 var ErrBatchImported = errors.New("该文件/批次已经导入过（文件指纹相同）；如确需重导请先备份并清空数据后重新导入")
 
+// ImportOptions 导入附加选项（Phase 9 Preview/Review）。
+type ImportOptions struct {
+	// ConfirmedSuspects 用户勾选确认“当前仍借出”的疑似在借设备 source_key 列表
+	// （仅外部公司、可唯一定位的候选；导入同事务内置 BORROWED 并建 borrow_record+flow，§三十三）。
+	ConfirmedSuspects []string
+}
+
 // Import 将解析结果写入数据库（单事务，决策 18 §四十三）。
-// 流程：批次幂等检查 → 空库守卫 → 单事务{类别、import_batch、设备行(来源键)、IMPORT_INIT、
-// batch 计数、equipment_seq 全量重算、audit}。
 func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
+	return ImportWithOptions(db, res, ImportOptions{})
+}
+
+// ImportWithOptions 与 Import 相同，并应用用户勾选的疑似在借设备（置 BORROWED）。
+func ImportWithOptions(db *gorm.DB, res *ParseResult, opts ImportOptions) (*ImportReport, error) {
 	now := time.Now()
 	report := &ImportReport{Filename: res.Filename, SourceHash: res.SourceHash,
 		Time: now.Format("2006-01-02 15:04:05")}
@@ -150,6 +162,7 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 		imported := 0
 		unnumbered := 0
 		firstCode := ""
+		eqBySource := map[string]uint{} // source_key -> equipment id（供勾选疑似应用，Phase 9）
 		for _, g := range okGroups {
 			catName := g.Category
 			if catName == "" {
@@ -160,6 +173,7 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 
 			// 有编号设备：一条一设备（决策 18：重复编号=同号多台真机，逐 token 展开）
 			for i, no := range g.Numbers {
+				sk := fmt.Sprintf("R%d-R%d#N%d", g.RowFrom, g.RowTo, i+1)
 				eq := models.Equipment{
 					EquipmentNo:   ptr(no),
 					InternalCode:  nextCode(),
@@ -169,7 +183,7 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 					Status:        statusInStock,
 					CurrentSince:  models.ValidTime(now),
 					ImportBatchID: &batch.ID,
-					SourceKey:     fmt.Sprintf("R%d-R%d#N%d", g.RowFrom, g.RowTo, i+1), // 来源定位（§四十）
+					SourceKey:     sk, // 来源定位（§四十）
 					CreatedAt:     models.FromTime(now),
 					UpdatedAt:     models.FromTime(now),
 				}
@@ -179,6 +193,7 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 				if err := tx.Create(&eq).Error; err != nil {
 					return fmt.Errorf("写入设备 %s(%s) 失败: %w", g.Name, no, err)
 				}
+				eqBySource[sk] = eq.ID
 				imported++
 				if err := writeInit(tx, eq.ID, sourceRemark, now); err != nil {
 					return err
@@ -187,6 +202,7 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 			// 无编号设备（含描述文本当编号）：逐台展开（决策 18 §十）
 			remark := g.DescRemark
 			for i := 0; i < g.Unnumbered; i++ {
+				sk := fmt.Sprintf("R%d-R%d#U%d", g.RowFrom, g.RowTo, i+1)
 				eq := models.Equipment{
 					EquipmentNo:   nil,
 					InternalCode:  nextCode(),
@@ -197,7 +213,7 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 					CurrentSince:  models.ValidTime(now),
 					Remark:        remark,
 					ImportBatchID: &batch.ID,
-					SourceKey:     fmt.Sprintf("R%d-R%d#U%d", g.RowFrom, g.RowTo, i+1),
+					SourceKey:     sk,
 					CreatedAt:     models.FromTime(now),
 					UpdatedAt:     models.FromTime(now),
 				}
@@ -207,6 +223,7 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 				if err := tx.Create(&eq).Error; err != nil {
 					return fmt.Errorf("写入无编号设备 %s 失败: %w", g.Name, err)
 				}
+				eqBySource[sk] = eq.ID
 				imported++
 				unnumbered++
 				if err := writeInit(tx, eq.ID, sourceRemark, now); err != nil {
@@ -233,11 +250,77 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 			return fmt.Errorf("equipment_seq 分配失败: %w", err)
 		}
 
+		// 3b) 应用用户勾选“当前仍借出”的疑似在借设备（§三十三；同事务置 BORROWED + borrow_record + flow）
+		borrowedNow := 0
+		if len(opts.ConfirmedSuspects) > 0 {
+			byKey := map[string]*SuspectCandidate{}
+			_, candidates, _, _, _ := BuildReviewView(res)
+			for _, c := range candidates {
+				byKey[c.SourceKey] = c
+			}
+			for _, sk := range opts.ConfirmedSuspects {
+				eqID, okEq := eqBySource[sk]
+				if !okEq {
+					continue
+				}
+				can, okCan := byKey[sk]
+				if !okCan {
+					continue // 只接受 Preview 列出的疑似候选，绝不猜测其他设备
+				}
+				var eq models.Equipment
+				if err := tx.First(&eq, eqID).Error; err != nil {
+					return err
+				}
+				if eq.Status != statusInStock {
+					continue
+				}
+				// 外借方字典：按公司名复用/新建（外部公司；内部单位已被 Preview 排除）
+				borrowerID, err := findOrCreateBorrower(tx, can.Company)
+				if err != nil {
+					return err
+				}
+				rec := models.BorrowRecord{
+					EquipmentID: eq.ID, BorrowerID: borrowerID,
+					Status:    models.BorrowOutstanding,
+					CreatedAt: models.FromTime(now), UpdatedAt: models.FromTime(now),
+				}
+				if bd := parseCandidateDate(can.BorrowDate); bd != nil {
+					rec.BorrowDate = models.FromTime(*bd)
+				} else {
+					rec.BorrowDate = models.FromTime(now)
+				}
+				if err := tx.Create(&rec).Error; err != nil {
+					return err
+				}
+				eq.Status = models.StatusBorrowed
+				eq.CurrentBorrowerID = &borrowerID
+				eq.CurrentBorrowRecordID = &rec.ID
+				eq.CurrentSince = models.ValidTime(rec.BorrowDate.Time)
+				eq.UpdatedAt = models.FromTime(now)
+				if err := tx.Save(&eq).Error; err != nil {
+					return err
+				}
+				if err := tx.Create(&models.Transaction{
+					EquipmentID: eq.ID, Action: models.ActionBorrow,
+					FromStatus: statusInStock, ToStatus: models.StatusBorrowed,
+					BorrowerID: &borrowerID, BorrowerName: can.Company,
+					BorrowRecordID: &rec.ID,
+					OccurredAt:     rec.BorrowDate, Operator: operatorImport,
+					Remark:    fmt.Sprintf("导入确认当前在借（来源 R%d：%s）", can.Row, can.Company),
+					CreatedAt: models.FromTime(now),
+				}).Error; err != nil {
+					return err
+				}
+				borrowedNow++
+			}
+		}
+		report.BorrowedNow = borrowedNow
+
 		// 4) audit 留痕
 		return tx.Create(&models.AuditLog{
 			Action:    "IMPORT",
 			Target:    res.Filename,
-			Detail:    fmt.Sprintf("批次#%d 导入 %d 台（台账源 %d），跳过 %d，分组 %d，Block %d，指纹 %s", batch.ID, imported, res.TotalD, report.Skipped, len(okGroups), blockGroups, res.SourceHash),
+			Detail:    fmt.Sprintf("批次#%d 导入 %d 台（台账源 %d），跳过 %d，分组 %d，Block %d，当前在借确认 %d，指纹 %s", batch.ID, imported, res.TotalD, report.Skipped, len(okGroups), blockGroups, borrowedNow, res.SourceHash),
 			Reason:    "",
 			Operator:  operatorImport,
 			CreatedAt: models.FromTime(now),
@@ -248,6 +331,38 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 	}
 	sort.Strings(report.Categories)
 	return report, nil
+}
+
+// findOrCreateBorrower 按名称查找外借方，不存在则新建（字典自动构建）。
+func findOrCreateBorrower(tx *gorm.DB, name string) (uint, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, fmt.Errorf("外借方名称为空，无法建立外借单")
+	}
+	var b models.Borrower
+	if err := tx.Where("name = ?", name).First(&b).Error; err == nil {
+		return b.ID, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	now := models.Now()
+	b = models.Borrower{Name: name, IsActive: true, CreatedAt: now, UpdatedAt: now}
+	if err := tx.Create(&b).Error; err != nil {
+		return 0, err
+	}
+	return b.ID, nil
+}
+
+// parseCandidateDate 解析“2006-01-02”候选借出日期。
+func parseCandidateDate(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	t, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(s), time.Local)
+	if err != nil {
+		return nil
+	}
+	return &t
 }
 
 // batchStatusDone import_batch 完成状态。
