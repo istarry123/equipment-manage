@@ -24,7 +24,15 @@ import (
 // version 通过 -ldflags 覆盖；默认跟随发布版本。
 var version = "1.0.0"
 
+// step 现场诊断探针：设 EQ_STEPLOG=1 时每步向控制台打印标记，用于定位启动早期崩溃。
+func step(msg string) {
+	if os.Getenv("EQ_STEPLOG") == "1" {
+		fmt.Fprintln(os.Stderr, "[step] "+msg)
+	}
+}
+
 func main() {
+	step("main: 开始")
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "启动失败:", err)
 		os.Exit(1)
@@ -32,16 +40,19 @@ func main() {
 }
 
 func run() error {
+	step("加载配置")
 	cfg, err := config.Load("config.yaml")
 	if err != nil {
 		return err
 	}
+	step("初始化日志")
 	if err := logger.Init(cfg.LogDir); err != nil {
 		return err
 	}
 	logger.Info("设备资产与流转管理系统 v%s 启动", version)
 	logger.Info("配置: 端口=%d 数据库=%s 备份保留=%d 份", cfg.Port, cfg.DBFile, cfg.BackupKeep)
 
+	step("打开数据库")
 	db, err := database.Open(cfg.DBFile)
 	if err != nil {
 		return err
@@ -52,6 +63,7 @@ func run() error {
 	}
 	defer sqlDB.Close()
 
+	step("执行数据库迁移")
 	if err := database.Migrate(sqlDB); err != nil {
 		return err
 	}
@@ -64,8 +76,17 @@ func run() error {
 		logger.Info("启动自动备份完成: %s", name)
 	}
 
+	step("启动自动备份")
+	if name, err := service.BackupNow(db, cfg.DBFile, cfg.BackupKeep); err != nil {
+		logger.Error("启动自动备份失败: %v", err)
+	} else {
+		logger.Info("启动自动备份完成: %s", name)
+	}
+
+	step("组装路由")
 	router := api.New(db, version)
 
+	step("监听端口")
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -77,6 +98,7 @@ func run() error {
 
 	// 服务启动后自动打开浏览器（测试时可设 EQ_NO_BROWSER=1 禁用）
 	if os.Getenv("EQ_NO_BROWSER") != "1" {
+		step("尝试打开浏览器")
 		go func() {
 			time.Sleep(600 * time.Millisecond)
 			if err := browser.Open(url); err != nil {
@@ -86,6 +108,8 @@ func run() error {
 	} else {
 		logger.Info("EQ_NO_BROWSER=1：跳过自动打开浏览器")
 	}
+
+	step("开始服务")
 
 	srv := &http.Server{
 		Handler:           router,
