@@ -22,8 +22,8 @@ func TestMigrateMemory(t *testing.T) {
 		t.Fatalf("重复迁移失败(应幂等): %v", err)
 	}
 	v, err := userVersion(sqlDB)
-	if err != nil || v != 2 {
-		t.Fatalf("user_version 应为 2, got %d err=%v", v, err)
+	if err != nil || v != 3 {
+		t.Fatalf("user_version 应为 3, got %d err=%v", v, err)
 	}
 }
 

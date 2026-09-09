@@ -160,10 +160,13 @@ type Category struct {
 func (Category) TableName() string { return "category" }
 
 // Equipment 设备主表：保存“当前状态快照”，历史记录在 flow_record。
+// 身份说明（决策 18）：equipment.id 是唯一设备身份；equipment_no 仅原始编号标签，
+// 可重复/为空/含中文符号；equipment_seq 为“同组(no+name+model 或无编号 model/name)展示序号”，非身份。
 type Equipment struct {
 	ID                    uint     `gorm:"primaryKey" json:"id"`
-	EquipmentNo           *string  `gorm:"index:idx_equipment_no" json:"equipment_no"` // 真实编号；无编号设备为 NULL
-	InternalCode          string   `gorm:"uniqueIndex;not null" json:"internal_code"`  // 系统内部码 EQ-xxxxx
+	EquipmentNo           *string  `gorm:"index:idx_equipment_no" json:"equipment_no"`                   // 原始编号；无编号设备为 NULL
+	EquipmentSeq          int      `gorm:"column:equipment_seq;not null;default:0" json:"equipment_seq"` // 组内展示序号（0=未分配）
+	InternalCode          string   `gorm:"uniqueIndex;not null" json:"internal_code"`                    // 系统内部码 EQ-xxxxx
 	Name                  string   `gorm:"not null;index" json:"name"`
 	Model                 string   `json:"model"`
 	CategoryID            *uint    `gorm:"index" json:"category_id"`
