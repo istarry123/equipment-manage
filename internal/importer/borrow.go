@@ -25,6 +25,7 @@ type BorrowNumber struct {
 }
 
 // BorrowEvent 一个历史借出事件（G 锚定行 + 后续续 J 行合并）。
+// Name/Model：事件所在设备块（B/C 合并感知；供与 F 资产按块匹配，Phase 7）。
 type BorrowEvent struct {
 	RowFrom     int            `json:"row_from"`
 	RowTo       int            `json:"row_to"`
@@ -32,6 +33,8 @@ type BorrowEvent struct {
 	Date        *time.Time     `json:"date,omitempty"` // 缺日/异常 → nil（DateReview=true）
 	DateReview  bool           `json:"date_review"`
 	Company     string         `json:"company"`
+	Name        string         `json:"name,omitempty"` // 事件所在设备块名称
+	Model       string         `json:"model,omitempty"`
 	CountRaw    string         `json:"count_raw"`
 	Count       int            `json:"count"` // 解析台数（0=空/无法解析）
 	JRaw        string         `json:"j_raw"` // J 全段原文（跨行以 | 连接）

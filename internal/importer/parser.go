@@ -90,16 +90,17 @@ type Group struct {
 
 // ParseResult 一次解析的结果。
 type ParseResult struct {
-	Filename     string         `json:"filename"`
-	SourceHash   string         `json:"source_hash"` // 源文件 SHA-256（批次幂等锚点，§二十五/二十六）
-	Sheet        string         `json:"sheet"`
-	Header       []string       `json:"header"`
-	Groups       []*Group       `json:"groups"`
-	Issues       []Issue        `json:"issues"`
-	TotalD       int            `json:"total_d"` // 源台账数量合计
-	ReviewN      int            `json:"review_n"`
-	BorrowEvents []*BorrowEvent `json:"borrow_events,omitempty"` // J 列借出事件（Phase 6 解析层）
-	BlankRows    []int          `json:"blank_rows,omitempty"`
+	Filename     string            `json:"filename"`
+	SourceHash   string            `json:"source_hash"` // 源文件 SHA-256（批次幂等锚点，§二十五/二十六）
+	Sheet        string            `json:"sheet"`
+	Header       []string          `json:"header"`
+	Groups       []*Group          `json:"groups"`
+	Issues       []Issue           `json:"issues"`
+	TotalD       int               `json:"total_d"` // 源台账数量合计
+	ReviewN      int               `json:"review_n"`
+	BorrowEvents []*BorrowEvent    `json:"borrow_events,omitempty"` // J 列借出事件（Phase 6 解析层）
+	Derived      *DerivationReport `json:"derived,omitempty"`       // 设备最终状态推导（Phase 7）
+	BlankRows    []int             `json:"blank_rows,omitempty"`
 }
 
 // block 表示按 B（名称）锚点划分的连续行区间（用于跨行回填 name/model 的行归属）。
@@ -335,6 +336,9 @@ func Parse(path string) (*ParseResult, error) {
 
 	// 4) 分组级校验（决策 18：重复不再 BLOCK；数量一致性 BLOCK）
 	validateGroups(res)
+
+	// 5) 设备最终状态推导（Phase 7；只读推导，不写库）
+	res.Derived = DeriveEquipmentStatus(res)
 	return res, nil
 }
 
@@ -410,10 +414,12 @@ func collectBorrowEvents(ownCell func(col, row int) string, cell func(col, row i
 	if cur != nil {
 		events = append(events, cur)
 	}
-	// 生成结构化事件（解析日期/台数/编号）
+	// 生成结构化事件（解析日期/台数/编号；块上下文=事件首行 B/C 合并值）
 	out := make([]*BorrowEvent, 0, len(events))
 	for _, e := range events {
 		be := buildBorrowEvent(e.RowFrom, e.RowTo, e.DateRaw, e.Company, e.CountRaw, e.JRaw, e.KRemark)
+		be.Name = cell(2, e.RowFrom)  // B 列：设备名称（合并感知）
+		be.Model = cell(3, e.RowFrom) // C 列：型号
 		out = append(out, be)
 	}
 	return out
