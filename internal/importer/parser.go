@@ -90,15 +90,16 @@ type Group struct {
 
 // ParseResult 一次解析的结果。
 type ParseResult struct {
-	Filename   string   `json:"filename"`
-	SourceHash string   `json:"source_hash"` // 源文件 SHA-256（批次幂等锚点，§二十五/二十六）
-	Sheet      string   `json:"sheet"`
-	Header     []string `json:"header"`
-	Groups     []*Group `json:"groups"`
-	Issues     []Issue  `json:"issues"`
-	TotalD     int      `json:"total_d"` // 源台账数量合计
-	ReviewN    int      `json:"review_n"`
-	BlankRows  []int    `json:"blank_rows,omitempty"`
+	Filename     string         `json:"filename"`
+	SourceHash   string         `json:"source_hash"` // 源文件 SHA-256（批次幂等锚点，§二十五/二十六）
+	Sheet        string         `json:"sheet"`
+	Header       []string       `json:"header"`
+	Groups       []*Group       `json:"groups"`
+	Issues       []Issue        `json:"issues"`
+	TotalD       int            `json:"total_d"` // 源台账数量合计
+	ReviewN      int            `json:"review_n"`
+	BorrowEvents []*BorrowEvent `json:"borrow_events,omitempty"` // J 列借出事件（Phase 6 解析层）
+	BlankRows    []int          `json:"blank_rows,omitempty"`
 }
 
 // block 表示按 B（名称）锚点划分的连续行区间（用于跨行回填 name/model 的行归属）。
@@ -329,9 +330,93 @@ func Parse(path string) (*ParseResult, error) {
 		res.Groups = append(res.Groups, groupByKey[k])
 	}
 
-	// 3) 分组级校验（决策 18：重复不再 BLOCK；数量一致性 BLOCK）
+	// 3) J 列借出事件解析（Phase 6；G/H/I/J/K 锚定行 + 续 J 行合并）
+	res.BorrowEvents = collectBorrowEvents(ownCell, cell)
+
+	// 4) 分组级校验（决策 18：重复不再 BLOCK；数量一致性 BLOCK）
 	validateGroups(res)
 	return res, nil
+}
+
+// collectBorrowEvents 扫描 G–K 列，按“G 自有值=事件首行；其后到下一个 G 自有行之前含 J 的行并入”合并事件。
+// 事件数口径与决策 15 一致（G 锚定 144 = 内部 101 + 外部 43）。
+// 续行若自带 I（合并格内的另一起借出）→ 事件置 REVIEW（不猜测是否同一批，交给用户）。
+// 只读不写库；纯解析，永不丢原文（§十六）。
+func collectBorrowEvents(ownCell func(col, row int) string, cell func(col, row int) string) []*BorrowEvent {
+	// 列常量：G=7 H=8 I=9 J=10 K=11（1-based）
+	const (
+		cDate = 7
+		cComp = 8
+		cCnt  = 9
+		cJ    = 10
+		cK    = 11
+	)
+	var events []*BorrowEvent
+	var cur *BorrowEvent
+	type rowData struct{ g, h, i, j, k string }
+	// 收集各行 G/H/I/J/K（自有 G/I/J/K；H 走合并感知取值）
+	data := map[int]rowData{}
+	rowOrder := make([]int, 0, 120)
+	for r := sheetDataStart; r <= sheetSumRow-1; r++ {
+		d := rowData{
+			g: ownCell(cDate, r), h: cell(cComp, r),
+			i: ownCell(cCnt, r), j: ownCell(cJ, r), k: ownCell(cK, r),
+		}
+		if d.g == "" && d.h == "" && d.i == "" && d.j == "" && d.k == "" {
+			continue
+		}
+		data[r] = d
+		rowOrder = append(rowOrder, r)
+	}
+	for _, r := range rowOrder {
+		d := data[r]
+		// G 自有值 → 开启新事件
+		if d.g != "" {
+			if cur != nil {
+				events = append(events, cur)
+			}
+			cur = &BorrowEvent{
+				RowFrom: r, RowTo: r,
+				DateRaw: d.g, Company: d.h,
+				CountRaw: d.i, KRemark: d.k,
+			}
+			if d.j != "" {
+				cur.JRaw = d.j
+			}
+			continue
+		}
+		// 续 J 行：并入当前事件（要求其确有 J/H/I 内容）
+		if cur != nil && (d.j != "" || d.i != "") {
+			if d.i != "" && cur.CountRaw != "" && d.i != cur.CountRaw {
+				// 合并区内出现第二个自有 I：不猜测是否同批，REVIEW
+				cur.review(fmt.Sprintf("R%d 续行另有台数 I=%s（事件首行 I=%s），是否同批借出请人工确认", r, d.i, cur.CountRaw))
+			}
+			cur.RowTo = r
+			if d.j != "" {
+				if cur.JRaw == "" {
+					cur.JRaw = d.j
+				} else {
+					cur.JRaw += " | " + d.j
+				}
+			}
+			if cur.CountRaw == "" {
+				cur.CountRaw = d.i
+			}
+			if cur.KRemark == "" {
+				cur.KRemark = d.k
+			}
+		}
+	}
+	if cur != nil {
+		events = append(events, cur)
+	}
+	// 生成结构化事件（解析日期/台数/编号）
+	out := make([]*BorrowEvent, 0, len(events))
+	for _, e := range events {
+		be := buildBorrowEvent(e.RowFrom, e.RowTo, e.DateRaw, e.Company, e.CountRaw, e.JRaw, e.KRemark)
+		out = append(out, be)
+	}
+	return out
 }
 
 // joinRemark 累积多段备注文本（空格分隔，去重防重复拼接）。
