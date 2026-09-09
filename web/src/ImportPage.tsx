@@ -165,15 +165,62 @@ export default function ImportPage() {
   const [reviewAck, setReviewAck] = useState<Record<string, boolean>>({});
   const [parsing, setParsing] = useState(false);
   const [running, setRunning] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
   const [eq, setEq] = useState<EqResp | null>(null);
   const [loadEq, setLoadEq] = useState(false);
   const [error, setError] = useState<string>('');
+  const [resetMsg, setResetMsg] = useState<string>('');
 
   const resetReviewState = useCallback(() => {
     setSuspectPicked({});
     setReviewAck({});
   }, []);
+
+  // 清空重导（Phase10 决策18⑤）：危险操作，需二次确认；后端先自动备份再清空业务数据。
+  const doReset = useCallback(async () => {
+    setResetting(true);
+    setError('');
+    setResetMsg('');
+    try {
+      const resp = await fetch('/api/import/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const data = await jsonOrError<{ message: string; backup_name?: string; equipment_deleted?: number }>(resp);
+      setResetMsg(data.message ?? '已清空，可重新导入');
+      setParseId('');
+      setSummary(null);
+      setIssues([]);
+      setGroups([]);
+      setDevices([]);
+      setSuspects([]);
+      setReviews([]);
+      resetReviewState();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '清空失败');
+    } finally {
+      setResetting(false);
+    }
+  }, [resetReviewState]);
+
+  const confirmReset = useCallback(() => {
+    Modal.confirm({
+      title: '清空重导（危险操作）',
+      content: (
+        <span>
+          将先<b>自动备份</b>当前数据库，然后<b>清空全部业务数据</b>（设备 / 流转历史 / 外借单 / 导入批次）；
+          类别、班组、外借方字典与操作审计保留。清空后需重新上传 Excel 全量导入。<br />
+          <Typography.Text type="danger">此操作不可撤销（可从备份恢复）。</Typography.Text>
+        </span>
+      ),
+      okText: '我已备份确认，清空',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => doReset(),
+    });
+  }, [doReset]);
 
   const doParse = useCallback(async (file: File) => {
     setError('');
@@ -348,7 +395,7 @@ export default function ImportPage() {
             type="info"
             showIcon
             message="导入流程：选择 Excel → 解析预览 → 人工审阅（REVIEW 清点 + 疑似在借勾选）→ 确认导入 → 报告"
-            description="仅支持首次空库全量导入。设备默认以【在库】导入；勾选「疑似在借」为当前仍外借的设备将在导入时置为外借并生成外借单（仅外部公司，含『双发』的内部单位不作外借）。Excel 只作为一次性数据来源。"
+            description="首次空库导入；库中已有数据时先执行「清空重导」（自动备份后清空业务数据）。设备默认以【在库】导入；勾选「疑似在借」为当前仍外借的设备将置为外借并生成外借单（仅外部公司）。Excel 只作为一次性数据来源。"
           />
           <Upload
             accept=".xlsx"
@@ -358,10 +405,16 @@ export default function ImportPage() {
               return false;
             }}
           >
-            <Button type="primary" icon={<UploadOutlined />} loading={parsing} disabled={running}>
+            <Button type="primary" icon={<UploadOutlined />} loading={parsing} disabled={running || resetting}>
               选择 Excel 文件（设备借出总账.xlsx）
             </Button>
           </Upload>
+          <Space>
+            <Button danger loading={resetting} disabled={running || parsing} onClick={confirmReset}>
+              清空重导（危险：先备份 → 清空业务数据）
+            </Button>
+          </Space>
+          {resetMsg && <Alert type="success" showIcon message={resetMsg} />}
           {error && <Alert type="error" showIcon message={error} />}
         </Space>
       </Card>

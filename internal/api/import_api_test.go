@@ -8,7 +8,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"equipment/internal/database"
+	"equipment/internal/models"
+	"equipment/internal/service"
 )
 
 const repoRootForImportTest = "../.."
@@ -113,5 +119,150 @@ func TestImportRunReviewGate(t *testing.T) {
 	}
 	if report.Report.BorrowedNow == 0 {
 		t.Log("提示：勾选疑似后 borrowed_now=0（真实文件外部疑似候选可能为空或全勾选失败）")
+	}
+}
+
+// TestImportResetAndReimport 清空重导（Phase10 决策18⑤）：非空库 → reset(备份+清空) → 全量重导。
+func TestImportResetAndReimport(t *testing.T) {
+	dir := t.TempDir()
+	dbFile := filepath.Join(dir, "equipment.db")
+	db, err := database.Open(dbFile)
+	if err != nil {
+		t.Fatalf("Open 失败: %v", err)
+	}
+	sqlDB, err := database.SQLDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(sqlDB); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	r := New(db, "test")
+	// 预置一台设备 → 库非空（模拟旧数据）
+	cid := mkCategory(t, db, "裁剪设备")
+	if _, err := service.CreateEquipment(db, service.CreateEquipmentInput{
+		EquipmentNo: strPtr("6061"), Name: "环形割刀", Model: "EBK-SA", CategoryID: &cid, Operator: "a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 未确认 → 400
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/import/reset", bytes.NewReader([]byte(body)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+	if w := post(`{"confirm":false}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("未确认应 400，实际 %d %s", w.Code, w.Body.String())
+	}
+	// 确认 → 清空（自动备份 + audit）
+	if w := post(`{"confirm":true}`); w.Code != http.StatusOK {
+		t.Fatalf("reset 失败: %d %s", w.Code, w.Body.String())
+	}
+	var n int64
+	db.Model(&models.Equipment{}).Count(&n)
+	if n != 0 {
+		t.Fatalf("reset 后设备应为 0，实际 %d", n)
+	}
+	var audit int64
+	db.Model(&models.AuditLog{}).Where("action = ?", "IMPORT_RESET").Count(&audit)
+	if audit != 1 {
+		t.Fatalf("应写 1 条 IMPORT_RESET audit，实际 %d", audit)
+	}
+	// 字典保留
+	var cat int64
+	db.Model(&models.Category{}).Count(&cat)
+	if cat != 1 {
+		t.Fatalf("reset 应保留类别字典，实际 %d", cat)
+	}
+	// 全量重导（真实文件）→ 2147 台
+	data, err := os.ReadFile(filepath.Join(repoRootForImportTest, "设备借出总账.xlsx"))
+	if err != nil {
+		t.Fatalf("读取 Excel 失败: %v", err)
+	}
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, _ := w.CreateFormFile("file", "设备借出总账.xlsx")
+	if _, err := fw.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/import/parse", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("parse 失败: %d %s", rec.Code, rec.Body.String())
+	}
+	var parsed struct {
+		ParseID string `json:"parse_id"`
+		Preview struct {
+			Reviews []struct {
+				Key string `json:"key"`
+			} `json:"reviews"`
+			Suspected []struct {
+				SourceKey string `json:"source_key"`
+			} `json:"suspected"`
+		} `json:"preview"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	var ack, sus []string
+	for _, rv := range parsed.Preview.Reviews {
+		ack = append(ack, rv.Key)
+	}
+	for _, s := range parsed.Preview.Suspected {
+		sus = append(sus, s.SourceKey)
+	}
+	runBody, _ := json.Marshal(map[string]any{
+		"parse_id": parsed.ParseID, "confirmed_suspects": sus, "acknowledged_reviews": ack,
+	})
+	req2 := httptest.NewRequest(http.MethodPost, "/api/import/run", bytes.NewReader(runBody))
+	req2.Header.Set("Content-Type", "application/json")
+	rec2 := httptest.NewRecorder()
+	r.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("重导失败: %d %s", rec2.Code, rec2.Body.String())
+	}
+	var rep struct {
+		Report struct {
+			Imported int `json:"imported"`
+		} `json:"report"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Report.Imported != 2147 {
+		t.Fatalf("清空重导应导入 2147 台，实际 %d", rep.Report.Imported)
+	}
+	// 清理：关闭连接释放文件锁；删除 reset 在 cwd backup/ 生成的备份（测试隔离）
+	if err := sqlDB.Close(); err != nil {
+		t.Logf("关闭测试库失败: %v", err)
+	}
+	cleanTestBackups(t)
+}
+
+// cleanTestBackups 移除测试运行期间在 cwd backup/ 新建的备份文件（reset 内部自动备份）。
+func cleanTestBackups(t *testing.T) {
+	t.Helper()
+	dir := filepath.Join(".", "backup")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".db") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if time.Since(info.ModTime()) < 2*time.Minute {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
 	}
 }

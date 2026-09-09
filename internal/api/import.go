@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"equipment/internal/importer"
+	"equipment/internal/models"
+	"equipment/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -347,6 +349,58 @@ func (h *importHandler) Run(c *gin.Context) {
 	// 导入成功后清理会话与临时文件
 	h.store.remove(body.ParseID)
 	c.JSON(http.StatusOK, gin.H{"report": report})
+}
+
+// Reset POST /api/import/reset：清空重导前置（危险操作，决策18⑤/铁律5）。
+// body: { confirm: true } —— 必须先二次确认；执行顺序：自动备份 → 单事务清空业务数据
+// （equipment/flow_record/borrow_record/import_batch，保留字典与 audit 历史）→ audit 留痕。
+func (h *importHandler) Reset(c *gin.Context) {
+	var body struct {
+		Confirm bool `json:"confirm"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeError(c, http.StatusBadRequest, "请求参数错误")
+		return
+	}
+	if !body.Confirm {
+		writeError(c, http.StatusBadRequest, "清空是危险操作：请先备份并确认（confirm: true）")
+		return
+	}
+	// 提示当前规模（防误清）
+	if n, err := service.CountEquipment(h.server.DB); err != nil {
+		writeError(c, http.StatusInternalServerError, "统计设备数失败")
+		return
+	} else if n == 0 {
+		// 空库无需清空；直接返回（幂等安全）
+		c.JSON(http.StatusOK, gin.H{"reset": true, "message": "数据库为空，无需清空", "equipment_deleted": 0})
+		return
+	}
+	dbFile, keep := runtimeDBInfo()
+	// 1) 自动备份
+	backupName, err := service.BackupNow(h.server.DB, dbFile, keep)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "清空前自动备份失败，已中止: "+err.Error())
+		return
+	}
+	// 2) 单事务清空业务数据
+	res, err := service.ClearImportData(h.server.DB)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// 3) audit 留痕
+	h.server.DB.Create(&models.AuditLog{ //nolint:errcheck
+		Action: "IMPORT_RESET", Target: backupName,
+		Detail: fmt.Sprintf("清空重导前置：清空业务数据（设备 %d / 流转 %d / 外借单 %d / 批次 %d），自动备份 %s",
+			res.EquipmentDeleted, res.FlowDeleted, res.BorrowDeleted, res.BatchDeleted, backupName),
+		Operator: "系统导入", CreatedAt: models.Now(),
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"reset": true, "backup_name": backupName,
+		"equipment_deleted": res.EquipmentDeleted, "flow_deleted": res.FlowDeleted,
+		"borrow_deleted": res.BorrowDeleted, "batch_deleted": res.BatchDeleted,
+		"message": "业务数据已清空（已自动备份为 " + backupName + "）。可重新上传 Excel 执行首次全量导入。",
+	})
 }
 
 func randomID() (string, error) {

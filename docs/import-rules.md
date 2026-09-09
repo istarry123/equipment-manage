@@ -143,4 +143,11 @@ Excel 无归还列 → 不能从文件判定"当前哪些设备仍在外"。**�
 - `ImportWithOptions`：用户勾选「当前仍外借」的设备在**同一事务**内置 BORROWED，建 borrower 字典（复用/新建）+ borrow_record(OUTSTANDING，borrow_date=最近借出日期)+ BORROW flow；未勾选保持 IN_STOCK。Report 增 `borrowed_now`。
 - 真实文件 Preview：外部疑似 119、REVIEW 57、事件 144（内部 101+外部 43）。
 
+### v1.1 清空重导 / 真实 Excel 终验（Phase 10，2026-09-09）
+
+- `service.ClearImportData`：单事务清空业务数据（equipment / flow_record / borrow_record / import_batch），**保留字典（category/team/borrower）、settings、audit 历史**（历史留痕永不清除）。
+- `POST /api/import/reset`（危险操作，决策18⑤/铁律5）：需 `confirm:true`；执行顺序 = 统计现有规模 → **自动备份** → 单事务清空 → `IMPORT_RESET` audit。空库幂等（提示无需清空）。
+- 前端 ImportPage 新增「清空重导（危险）」入口：二次确认弹窗（明示自动备份 + 清空范围 + 字典保留 + 可从备份恢复），成功后清空预览状态可重新上传。
+- 真实 Excel 端到端验收（测试）：非空库 → reset(确认) → parse → REVIEW 全清点 → run 全量导入 **2147 台**；REVIEW 未清点 → 422 门禁。
+
 **Blockers**：~~W-1/W-2/W-3/W-4/W-5~~ —— **已全部答复（2026-09-08），无阻塞**。W-6…W-15 为非阻塞项，按表中默认处理，可在后续版本按需启用。
