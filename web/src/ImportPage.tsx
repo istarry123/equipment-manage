@@ -118,6 +118,39 @@ interface Report {
   time: string;
 }
 
+interface ReconDiff {
+  source_key: string;
+  display_no: string;
+  equipment_no: string;
+  name: string;
+  model: string;
+  group_rows: string;
+  internal_code?: string;
+  side: string;
+  detail?: string;
+}
+
+interface ReconcileReport {
+  batch_id: number;
+  source_hash: string;
+  source_name: string;
+  total_d: number;
+  excel_ok_devs: number;
+  excel_block_devs: number;
+  db_batch_devs: number;
+  num_excel: number;
+  num_db: number;
+  unnumbered_excel: number;
+  unnumbered_db: number;
+  dup_groups_excel: number;
+  dup_groups_db: number;
+  borrow_unmatched: number;
+  missing: ReconDiff[];
+  extra: ReconDiff[];
+  pass: boolean;
+  message: string;
+}
+
 interface EqItem {
   id: number;
   equipment_no: string | null;
@@ -167,6 +200,8 @@ export default function ImportPage() {
   const [running, setRunning] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
+  const [reconcile, setReconcile] = useState<ReconcileReport | null>(null);
+  const [reconciling, setReconciling] = useState(false);
   const [eq, setEq] = useState<EqResp | null>(null);
   const [loadEq, setLoadEq] = useState(false);
   const [error, setError] = useState<string>('');
@@ -254,6 +289,7 @@ export default function ImportPage() {
   const doImport = useCallback(async () => {
     setRunning(true);
     setError('');
+    setReconcile(null);
     try {
       const confirmed = suspects.filter((s) => suspectPicked[s.source_key]).map((s) => s.source_key);
       const ack = reviews.map((r) => r.key);
@@ -274,6 +310,26 @@ export default function ImportPage() {
       setRunning(false);
     }
   }, [parseId, suspects, suspectPicked, reviews]);
+
+  // 对账（§四十七）：以解析会话 source_hash 关联批次，Excel ↔ DB 逐台核对
+  const doReconcile = useCallback(async () => {
+    if (!parseId) return;
+    setReconciling(true);
+    setError('');
+    try {
+      const resp = await fetch('/api/import/reconcile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parse_id: parseId }),
+      });
+      const data = await jsonOrError<{ reconcile: ReconcileReport }>(resp);
+      setReconcile(data.reconcile);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '对账失败');
+    } finally {
+      setReconciling(false);
+    }
+  }, [parseId]);
 
   const confirmImport = useCallback(() => {
     if (!summary) return;
@@ -385,6 +441,15 @@ export default function ImportPage() {
       render: (v: string) => <Tag color={v === 'IN_STOCK' ? 'green' : v === 'BORROWED' ? 'orange' : 'blue'}>{statusText[v] ?? v}</Tag>,
     },
     { title: '到达时间', dataIndex: 'current_since', width: 170, render: (v: string | null) => v ?? '-' },
+  ];
+
+  const reconDiffColumns: ColumnsType<ReconDiff> = [
+    { title: '方向', dataIndex: 'side', width: 90, render: (v: string) => (v === 'excel' ? <Tag color="red">Excel 缺失</Tag> : <Tag color="orange">DB 多出</Tag>) },
+    { title: '显示编号', dataIndex: 'display_no', width: 150 },
+    { title: '名称', dataIndex: 'name', ellipsis: true },
+    { title: '型号', dataIndex: 'model', width: 130, render: (v: string) => v || '-' },
+    { title: '来源', dataIndex: 'group_rows', width: 110, render: (v: string) => v || '-' },
+    { title: '内部码', dataIndex: 'internal_code', width: 110, render: (v?: string) => v || '-' },
   ];
 
   return (
@@ -587,6 +652,50 @@ export default function ImportPage() {
               </Typography.Paragraph>
               <Table rowKey="id" size="small" columns={eqColumns} dataSource={eq.items.slice(0, 50)} pagination={false} />
             </>
+          )}
+        </Card>
+      )}
+
+      {report && (
+        <Card
+          title={
+            <span>
+              数据对账（Reconciliation）
+              {reconcile && (reconcile.pass
+                ? <Tag color="green" style={{ marginLeft: 8 }}>PASS</Tag>
+                : <Tag color="red" style={{ marginLeft: 8 }}>FAIL</Tag>)}
+            </span>
+          }
+          extra={<Button loading={reconciling} onClick={() => void doReconcile()}>执行对账</Button>}
+        >
+          {!reconcile ? (
+            <Alert type="info" showIcon
+              message="导入后点击「执行对账」，将 Excel 解析的可导入设备与数据库该批次设备逐台比对（缺失 / 多出 / 无编号 / 同号多台 / 历史借出未匹配）。" />
+          ) : (
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Alert type={reconcile.pass ? 'success' : 'error'} showIcon message={reconcile.message} />
+              <Descriptions column={4} size="small" bordered>
+                <Descriptions.Item label="Excel 台账数量">{reconcile.total_d}</Descriptions.Item>
+                <Descriptions.Item label="Excel 可导入">{reconcile.excel_ok_devs} 台</Descriptions.Item>
+                <Descriptions.Item label="Excel 被阻断">{reconcile.excel_block_devs} 台</Descriptions.Item>
+                <Descriptions.Item label="数据库批次设备">{reconcile.db_batch_devs} 台</Descriptions.Item>
+                <Descriptions.Item label="有编号（Excel/DB）">{reconcile.num_excel} / {reconcile.num_db}</Descriptions.Item>
+                <Descriptions.Item label="无编号（Excel/DB）">{reconcile.unnumbered_excel} / {reconcile.unnumbered_db}</Descriptions.Item>
+                <Descriptions.Item label="同号多台组（Excel/DB）">{reconcile.dup_groups_excel} / {reconcile.dup_groups_db}</Descriptions.Item>
+                <Descriptions.Item label="历史借出未匹配">{reconcile.borrow_unmatched}</Descriptions.Item>
+              </Descriptions>
+              {(reconcile.missing.length > 0 || reconcile.extra.length > 0) ? (
+                <Table
+                  rowKey={(r) => `${r.side}-${r.source_key}`}
+                  size="small"
+                  columns={reconDiffColumns}
+                  dataSource={[...reconcile.missing, ...reconcile.extra]}
+                  pagination={{ pageSize: 10 }}
+                />
+              ) : (
+                <Alert type="success" showIcon message="无缺失 / 无多出，Excel 与数据库完全一致。" />
+              )}
+            </Space>
           )}
         </Card>
       )}

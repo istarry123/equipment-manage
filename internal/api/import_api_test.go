@@ -120,6 +120,32 @@ func TestImportRunReviewGate(t *testing.T) {
 	if report.Report.BorrowedNow == 0 {
 		t.Log("提示：勾选疑似后 borrowed_now=0（真实文件外部疑似候选可能为空或全勾选失败）")
 	}
+	// 对账（§四十七）：run 后会话保留（只删临时文件），应能对账且 PASS
+	recBody, _ := json.Marshal(map[string]any{"parse_id": parsed.ParseID})
+	req4 := httptest.NewRequest(http.MethodPost, "/api/import/reconcile", bytes.NewReader(recBody))
+	req4.Header.Set("Content-Type", "application/json")
+	rec4 := httptest.NewRecorder()
+	r.ServeHTTP(rec4, req4)
+	if rec4.Code != http.StatusOK {
+		t.Fatalf("对账失败: %d %s", rec4.Code, rec4.Body.String())
+	}
+	var recon struct {
+		Reconcile struct {
+			Pass        bool `json:"pass"`
+			ExcelOKDevs int  `json:"excel_ok_devs"`
+			DBBatchDevs int  `json:"db_batch_devs"`
+			Missing     int  `json:"missing"`
+			Extra       int  `json:"extra"`
+		} `json:"reconcile"`
+	}
+	if err := json.Unmarshal(rec4.Body.Bytes(), &recon); err != nil {
+		t.Fatal(err)
+	}
+	if !recon.Reconcile.Pass || recon.Reconcile.ExcelOKDevs != 2147 ||
+		recon.Reconcile.DBBatchDevs != 2147 ||
+		recon.Reconcile.Missing != 0 || recon.Reconcile.Extra != 0 {
+		t.Fatalf("对账应 PASS 且 2147==2147: %+v", recon.Reconcile)
+	}
 }
 
 // TestImportResetAndReimport 清空重导（Phase10 决策18⑤）：非空库 → reset(备份+清空) → 全量重导。

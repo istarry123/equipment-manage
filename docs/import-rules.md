@@ -150,4 +150,15 @@ Excel 无归还列 → 不能从文件判定"当前哪些设备仍在外"。**�
 - 前端 ImportPage 新增「清空重导（危险）」入口：二次确认弹窗（明示自动备份 + 清空范围 + 字典保留 + 可从备份恢复），成功后清空预览状态可重新上传。
 - 真实 Excel 端到端验收（测试）：非空库 → reset(确认) → parse → REVIEW 全清点 → run 全量导入 **2147 台**；REVIEW 未清点 → 422 门禁。
 
+### v1.1 数据对账 Reconciliation（Phase 11，2026-09-09）
+
+- `importer.Reconcile(db, res)`：以解析结果 source_hash 关联已导入批次，将 Excel 可导入设备（source_key 全集）与数据库该批次设备**逐台比对**：
+  - 总量：Excel 可导入台数 vs 数据库批次台数；
+  - 缺失（Excel 有/DB 无）与多出（DB 有/Excel 无）逐台列出（显示编号/名称/型号/来源行/内部码）；
+  - 有编号/无编号台数、同号多台组数（Excel/DB 双侧）、历史借出未匹配（Derived）。
+  - 任何差异 → FAIL 并列出；全等 → PASS。
+- `POST /api/import/reconcile {parse_id}`：run 后保留解析会话（仅清理上传文件）供对账；无批次/会话过期返回明确提示。
+- 前端 ImportPage 导入成功后新增「数据对账」卡片：执行对账 → PASS/FAIL + 双侧计数 + 差异清单表。
+- 真实文件对账 e2e：2147（Excel）== 2147（DB），PASS 无差异；删除一台后 FAIL 并列出缺失（service 测试）。
+
 **Blockers**：~~W-1/W-2/W-3/W-4/W-5~~ —— **已全部答复（2026-09-08），无阻塞**。W-6…W-15 为非阻塞项，按表中默认处理，可在后续版本按需启用。

@@ -43,6 +43,7 @@ func New(db *gorm.DB, version string) *gin.Engine {
 		api.POST("/import/parse", ih.Parse)
 		api.POST("/import/run", ih.Run)
 		api.POST("/import/reset", ih.Reset)
+		api.POST("/import/reconcile", ih.Reconcile)
 
 		api.GET("/equipment", s.ListEquipment)
 		api.POST("/equipment", s.CreateEquipment)

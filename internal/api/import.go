@@ -82,6 +82,16 @@ func (s *parseStore) removeLocked(id string) {
 	}
 }
 
+// dropFile 只删除上传文件、保留解析结果（导入成功后仍可对账 §四十七）。
+func (s *parseStore) dropFile(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if v, ok := s.data[id]; ok {
+		os.Remove(v.path) //nolint:errcheck
+		v.path = ""
+	}
+}
+
 type importHandler struct {
 	server *Server
 	store  *parseStore
@@ -346,9 +356,33 @@ func (h *importHandler) Run(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// 导入成功后清理会话与临时文件
-	h.store.remove(body.ParseID)
+	// 导入成功：清理临时文件，但保留解析会话供对账（Reconcile §四十七）
+	h.store.dropFile(body.ParseID)
 	c.JSON(http.StatusOK, gin.H{"report": report})
+}
+
+// Reconcile POST /api/import/reconcile {parse_id}：导入对账（§四十七）。
+// 以解析结果（source_hash）关联已导入批次，与数据库该批次设备按 source_key 逐台比对，
+// 输出缺失/多出/无编号/同号多台/历史借出未匹配；任何差异 FAIL 并列出。
+func (h *importHandler) Reconcile(c *gin.Context) {
+	var body struct {
+		ParseID string `json:"parse_id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.ParseID == "" {
+		writeError(c, http.StatusBadRequest, "缺少 parse_id")
+		return
+	}
+	sess, ok := h.store.get(body.ParseID)
+	if !ok {
+		writeError(c, http.StatusNotFound, "解析会话不存在或已过期（导入成功后会话已清理）：请重新上传同文件解析后再执行对账")
+		return
+	}
+	rep, err := importer.Reconcile(h.server.DB, sess.res)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"reconcile": rep})
 }
 
 // Reset POST /api/import/reset：清空重导前置（危险操作，决策18⑤/铁律5）。
