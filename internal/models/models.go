@@ -176,11 +176,29 @@ type Equipment struct {
 	CurrentBorrowRecordID *uint    `gorm:"index" json:"current_borrow_record_id"`
 	CurrentSince          NullTime `json:"current_since"` // 到达当前状态时间（交付时间口径）
 	Remark                string   `json:"remark"`
+	ImportBatchID         *uint    `gorm:"index:idx_equipment_batch" json:"import_batch_id,omitempty"` // 来源批次（可空=手工/旧数据）
+	SourceKey             string   `json:"source_key,omitempty"`                                       // 来源定位（如 R141#N3，追溯/对账用）
 	CreatedAt             Time     `json:"created_at"`
 	UpdatedAt             Time     `json:"updated_at"`
 }
 
 func (Equipment) TableName() string { return "equipment" }
+
+// ImportBatch 一次 Excel 导入批次（决策 18：来源可追踪 + 幂等）。
+type ImportBatch struct {
+	ID            uint   `gorm:"primaryKey" json:"id"`
+	SourceName    string `json:"source_name"`
+	SourceHash    string `gorm:"uniqueIndex" json:"source_hash"`
+	Status        string `gorm:"not null;default:DONE" json:"status"` // DONE
+	TotalRows     int    `json:"total_rows"`                          // 源台账数量
+	ImportedCount int    `json:"imported_count"`
+	WarningCount  int    `json:"warning_count"`
+	ErrorCount    int    `json:"error_count"`
+	CreatedAt     Time   `json:"created_at"`
+	UpdatedAt     Time   `json:"updated_at"`
+}
+
+func (ImportBatch) TableName() string { return "import_batch" }
 
 // Team 班组。停用不清除历史引用（决策 6）。
 type Team struct {

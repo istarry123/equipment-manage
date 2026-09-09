@@ -52,7 +52,7 @@ func TestRenumberAllSeqGroups(t *testing.T) {
 		now := models.Now()
 		if err := db.Create(&models.Equipment{
 			InternalCode: fmt.Sprintf("EQ-%06d", 6+i),
-			Name: "", Model: "", Status: models.StatusInStock,
+			Name:         "", Model: "", Status: models.StatusInStock,
 			CreatedAt: now, UpdatedAt: now,
 		}).Error; err != nil {
 			t.Fatal(err)

@@ -110,4 +110,10 @@ Excel 无归还列 → 不能从文件判定"当前哪些设备仍在外"。**�
 
 > v1.1（决策 18，2026-09-09）范围修订：F 列=设备资产全集（每编号 token 一台真机）；equipment_no 原样 TEXT（可重复/中文）；重复编号 WARN 展开；描述文本=无编号+备注；无法判断=REVIEW。`equipment.id` 是唯一设备身份，`equipment_seq` 为组内展示序号（V003）。
 
+### v1.1 导入落库（Phase 4，2026-09-09）
+
+- 单事务写库：import_batch（批次）→ 类别 → 设备行（编号每 token 一台 / 无编号逐台展开）→ 每台 IMPORT_INIT → 回填批次计数 → 事务内 RenumberAllSeq 分配 equipment_seq → audit。
+- 设备带 `import_batch_id` 与 `source_key`（如 `R141-R193#N5` / `#U2`）：来源可追踪、支撑 Reconciliation（Phase 11）。
+- 幂等：同文件（source_hash 一致）已成功导入 → `ErrBatchImported` 拒绝；非空库无同批次 → `ErrDBNotEmpty`。清空重导为专门危险流程（Phase 10，先备份）。
+
 **Blockers**：~~W-1/W-2/W-3/W-4/W-5~~ —— **已全部答复（2026-09-08），无阻塞**。W-6…W-15 为非阻塞项，按表中默认处理，可在后续版本按需启用。

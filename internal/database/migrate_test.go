@@ -22,8 +22,8 @@ func TestMigrateMemory(t *testing.T) {
 		t.Fatalf("重复迁移失败(应幂等): %v", err)
 	}
 	v, err := userVersion(sqlDB)
-	if err != nil || v != 3 {
-		t.Fatalf("user_version 应为 3, got %d err=%v", v, err)
+	if err != nil || v != 4 {
+		t.Fatalf("user_version 应为 4, got %d err=%v", v, err)
 	}
 }
 
@@ -43,7 +43,7 @@ func TestSchemaTablesExist(t *testing.T) {
 	if err := Migrate(sqlDB); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
-	want := []string{"category", "team", "borrower", "settings", "audit_log", "equipment", "borrow_record", "flow_record"}
+	want := []string{"category", "team", "borrower", "settings", "audit_log", "equipment", "borrow_record", "flow_record", "import_batch"}
 	rows, err := sqlDB.Query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
 	if err != nil {
 		t.Fatal(err)

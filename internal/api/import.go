@@ -259,7 +259,7 @@ func (h *importHandler) Run(c *gin.Context) {
 	}
 	report, err := importer.Import(h.server.DB, sess.res)
 	if err != nil {
-		if errors.Is(err, importer.ErrDBNotEmpty) {
+		if errors.Is(err, importer.ErrDBNotEmpty) || errors.Is(err, importer.ErrBatchImported) {
 			writeError(c, http.StatusConflict, err.Error())
 			return
 		}

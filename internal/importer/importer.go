@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"equipment/internal/models"
+	"equipment/internal/service"
 
 	"gorm.io/gorm"
 )
@@ -14,13 +15,16 @@ import (
 // ImportReport 导入报告（指标对齐主章程：总记录/成功/跳过/重复/异常/无编号）。
 type ImportReport struct {
 	Filename     string   `json:"filename"`
+	SourceHash   string   `json:"source_hash,omitempty"`
+	BatchID      uint     `json:"batch_id,omitempty"`
 	TotalSourceD int      `json:"total_source_d"` // 源台账数量合计（总记录）
 	Groups       int      `json:"groups"`         // 分组数
 	Imported     int      `json:"imported"`       // 成功导入设备台数
 	Skipped      int      `json:"skipped"`        // 因 BLOCK 跳过的设备台数
 	BlockGroups  int      `json:"block_groups"`   // 被 BLOCK 的分组数
-	Duplicates   int      `json:"duplicates"`     // 重复编号多录次数（需人工处理）
+	Duplicates   int      `json:"duplicates"`     // 同组重复编号多录次数（按多台真机展开，决策18）
 	Warnings     int      `json:"warnings"`       // WARN 级问题数
+	Reviews      int      `json:"reviews"`        // REVIEW 级问题数（需人工确认）
 	Unnumbered   int      `json:"unnumbered"`     // 导入的无编号台数
 	Categories   []string `json:"categories"`
 	InternalCode string   `json:"internal_code"` // 生成的 EQ 内部码区间
@@ -30,12 +34,30 @@ type ImportReport struct {
 // ErrDBNotEmpty 表示数据库已存在设备数据（禁止重复全量导入）。
 var ErrDBNotEmpty = errors.New("数据库已存在设备数据：本功能仅支持首次全量导入；如需重导请走“备份→清空→导入”流程（危险操作需二次确认）")
 
-// Import 将解析结果写入数据库（单事务）。
-// 前置：equipment 表必须为空（防覆盖，数据安全铁律）。
+// ErrBatchImported 表示同一文件（source hash 相同）已导入过（§二十六：幂等）。
+var ErrBatchImported = errors.New("该文件/批次已经导入过（文件指纹相同）；如确需重导请先备份并清空数据后重新导入")
+
+// Import 将解析结果写入数据库（单事务，决策 18 §四十三）。
+// 流程：批次幂等检查 → 空库守卫 → 单事务{类别、import_batch、设备行(来源键)、IMPORT_INIT、
+// batch 计数、equipment_seq 全量重算、audit}。
 func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 	now := time.Now()
-	report := &ImportReport{Filename: res.Filename, Time: now.Format("2006-01-02 15:04:05")}
+	report := &ImportReport{Filename: res.Filename, SourceHash: res.SourceHash,
+		Time: now.Format("2006-01-02 15:04:05")}
 
+	// 批次幂等（§二十五/二十六）：同文件指纹已成功导入 → 拒绝，绝不复制数据
+	if res.SourceHash != "" {
+		var c int64
+		if err := db.Model(&models.ImportBatch{}).
+			Where("source_hash = ? AND status = ?", res.SourceHash, batchStatusDone).Count(&c).Error; err != nil {
+			return nil, err
+		}
+		if c > 0 {
+			return nil, ErrBatchImported
+		}
+	}
+
+	// 空库守卫（防覆盖，数据安全铁律）
 	var existing int64
 	if err := db.Model(&models.Equipment{}).Count(&existing).Error; err != nil {
 		return nil, err
@@ -60,8 +82,11 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 		}
 	}
 	for _, is := range res.Issues {
-		if is.Level == "WARN" {
+		switch is.Level {
+		case "WARN":
 			warns++
+		case IssueLevelReview:
+			report.Reviews++
 		}
 	}
 	report.Groups = len(res.Groups)
@@ -89,7 +114,24 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 	}
 
 	err := db.Transaction(func(tx *gorm.DB) error {
-		// 类别
+		// 1) 批次记录（先建占位，随后回填计数）
+		batch := models.ImportBatch{
+			SourceName:    res.Filename,
+			SourceHash:    res.SourceHash,
+			Status:        batchStatusDone,
+			TotalRows:     res.TotalD,
+			ImportedCount: 0,
+			WarningCount:  warns,
+			ErrorCount:    blockGroups,
+			CreatedAt:     models.FromTime(now),
+			UpdatedAt:     models.FromTime(now),
+		}
+		if err := tx.Create(&batch).Error; err != nil {
+			return fmt.Errorf("写入 import_batch 失败: %w", err)
+		}
+		report.BatchID = batch.ID
+
+		// 2) 类别
 		catIDs := map[string]uint{}
 		for _, name := range report.Categories {
 			var c models.Category
@@ -116,18 +158,20 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 			catID := catIDs[catName]
 			sourceRemark := fmt.Sprintf("来源: %s（行 R%d-R%d）", res.Filename, g.RowFrom, g.RowTo)
 
-			// 有编号设备：一条一设备
-			for _, no := range g.Numbers {
+			// 有编号设备：一条一设备（决策 18：重复编号=同号多台真机，逐 token 展开）
+			for i, no := range g.Numbers {
 				eq := models.Equipment{
-					EquipmentNo:  ptr(no),
-					InternalCode: nextCode(),
-					Name:         g.Name,
-					Model:        g.Model,
-					CategoryID:   &catID,
-					Status:       statusInStock,
-					CurrentSince: models.ValidTime(now),
-					CreatedAt:    models.FromTime(now),
-					UpdatedAt:    models.FromTime(now),
+					EquipmentNo:   ptr(no),
+					InternalCode:  nextCode(),
+					Name:          g.Name,
+					Model:         g.Model,
+					CategoryID:    &catID,
+					Status:        statusInStock,
+					CurrentSince:  models.ValidTime(now),
+					ImportBatchID: &batch.ID,
+					SourceKey:     fmt.Sprintf("R%d-R%d#N%d", g.RowFrom, g.RowTo, i+1), // 来源定位（§四十）
+					CreatedAt:     models.FromTime(now),
+					UpdatedAt:     models.FromTime(now),
 				}
 				if firstCode == "" {
 					firstCode = eq.InternalCode
@@ -140,20 +184,22 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 					return err
 				}
 			}
-			// 无编号设备（含描述文本当编号）
+			// 无编号设备（含描述文本当编号）：逐台展开（决策 18 §十）
 			remark := g.DescRemark
 			for i := 0; i < g.Unnumbered; i++ {
 				eq := models.Equipment{
-					EquipmentNo:  nil,
-					InternalCode: nextCode(),
-					Name:         g.Name,
-					Model:        g.Model,
-					CategoryID:   &catID,
-					Status:       statusInStock,
-					CurrentSince: models.ValidTime(now),
-					Remark:       remark,
-					CreatedAt:    models.FromTime(now),
-					UpdatedAt:    models.FromTime(now),
+					EquipmentNo:   nil,
+					InternalCode:  nextCode(),
+					Name:          g.Name,
+					Model:         g.Model,
+					CategoryID:    &catID,
+					Status:        statusInStock,
+					CurrentSince:  models.ValidTime(now),
+					Remark:        remark,
+					ImportBatchID: &batch.ID,
+					SourceKey:     fmt.Sprintf("R%d-R%d#U%d", g.RowFrom, g.RowTo, i+1),
+					CreatedAt:     models.FromTime(now),
+					UpdatedAt:     models.FromTime(now),
 				}
 				if firstCode == "" {
 					firstCode = eq.InternalCode
@@ -176,11 +222,22 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 			report.InternalCode = "（无，全部被 BLOCK）"
 		}
 
-		// audit 留痕
+		// 3) 回填批次计数 + 事务内全量重算 equipment_seq（决策18；复用 service 权威分组逻辑）
+		if err := tx.Model(&models.ImportBatch{}).Where("id = ?", batch.ID).Updates(map[string]any{
+			"imported_count": imported,
+			"updated_at":     models.FromTime(now),
+		}).Error; err != nil {
+			return err
+		}
+		if err := service.RenumberAllSeq(tx); err != nil {
+			return fmt.Errorf("equipment_seq 分配失败: %w", err)
+		}
+
+		// 4) audit 留痕
 		return tx.Create(&models.AuditLog{
 			Action:    "IMPORT",
 			Target:    res.Filename,
-			Detail:    fmt.Sprintf("导入 %d 台（台账源 %d），跳过 %d，分组 %d，Block %d", imported, res.TotalD, report.Skipped, len(okGroups), blockGroups),
+			Detail:    fmt.Sprintf("批次#%d 导入 %d 台（台账源 %d），跳过 %d，分组 %d，Block %d，指纹 %s", batch.ID, imported, res.TotalD, report.Skipped, len(okGroups), blockGroups, res.SourceHash),
 			Reason:    "",
 			Operator:  operatorImport,
 			CreatedAt: models.FromTime(now),
@@ -192,6 +249,9 @@ func Import(db *gorm.DB, res *ParseResult) (*ImportReport, error) {
 	sort.Strings(report.Categories)
 	return report, nil
 }
+
+// batchStatusDone import_batch 完成状态。
+const batchStatusDone = "DONE"
 
 // writeInit 为导入设备写初始流转记录（决策 7）。
 func writeInit(tx *gorm.DB, equipmentID uint, remark string, now time.Time) error {

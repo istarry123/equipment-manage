@@ -3,7 +3,10 @@
 package importer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,14 +90,15 @@ type Group struct {
 
 // ParseResult 一次解析的结果。
 type ParseResult struct {
-	Filename  string   `json:"filename"`
-	Sheet     string   `json:"sheet"`
-	Header    []string `json:"header"`
-	Groups    []*Group `json:"groups"`
-	Issues    []Issue  `json:"issues"`
-	TotalD    int      `json:"total_d"` // 源台账数量合计
-	ReviewN   int      `json:"review_n"`
-	BlankRows []int    `json:"blank_rows,omitempty"`
+	Filename   string   `json:"filename"`
+	SourceHash string   `json:"source_hash"` // 源文件 SHA-256（批次幂等锚点，§二十五/二十六）
+	Sheet      string   `json:"sheet"`
+	Header     []string `json:"header"`
+	Groups     []*Group `json:"groups"`
+	Issues     []Issue  `json:"issues"`
+	TotalD     int      `json:"total_d"` // 源台账数量合计
+	ReviewN    int      `json:"review_n"`
+	BlankRows  []int    `json:"blank_rows,omitempty"`
 }
 
 // block 表示按 B（名称）锚点划分的连续行区间（用于跨行回填 name/model 的行归属）。
@@ -115,9 +119,7 @@ func Parse(path string) (*ParseResult, error) {
 	if len(sheets) == 0 {
 		return nil, fmt.Errorf("Excel 中没有工作表")
 	}
-	sheet := sheets[0]
-
-	// 1) 合并单元格：构建 单列纵向合并 的锚点映射
+	sheet := sheets[0]               // 1) 合并单元格：构建 单列纵向合并 的锚点映射
 	anchors := map[int]map[int]int{} // col -> (row -> anchorRow)
 	merges, err := f.GetMergeCells(sheet)
 	if err != nil {
@@ -177,6 +179,9 @@ func Parse(path string) (*ParseResult, error) {
 	}
 
 	res := &ParseResult{Sheet: sheet, Header: header}
+	if sum, err := fileSHA256(path); err == nil {
+		res.SourceHash = sum // 幂等锚点；读失败不阻断解析（会话层以文件为准）
+	}
 	groupByKey := map[string]*Group{}
 	order := []string{}
 
@@ -449,6 +454,16 @@ func validateGroups(res *ParseResult) {
 // splitTokens 按任意空白切分编号清单。
 func splitTokens(s string) []string {
 	return strings.FieldsFunc(s, func(r rune) bool { return unicode.IsSpace(r) })
+}
+
+// fileSHA256 计算源文件 SHA-256（十六进制小写）。
+func fileSHA256(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // splitAnnotation 剥离编号中的括号注释（全半角）。返回主体与注释。

@@ -78,7 +78,8 @@
 
 - Git：`main` 分支已初始化；基线提交完成（主章程 + 本治理文件 + 内嵌 Skill + `设备借出总账.xlsx` 入库）。
 - 数据源：`设备借出总账.xlsx` 已在工作区（单 Sheet「设备借出总账」；R2 表头 11 列：类别/设备名称/设备型号/台账数量/财务数量/台账设备编号/时间/公司/台数/借出设备编号/备注；含合并单元格、跨行主块、多行/空格分隔编号）。
-- 进度：**v1.1 重构执行中（决策 18）**：Phase 0(备份/快照 1477/1478) ✅ → Phase 1(V003 迁移) ✅ → Phase 2(equipment_seq/display_no 后端 + 启动 RenumberAllSeq) ✅ commit `18ed98f` → **Phase 3(Excel Parser 重构) ✅ 本次**。
+- 进度：**v1.1 重构执行中（决策 18）**：Phase 0(备份/快照 1477/1478) ✅ → Phase 1(V003 迁移) ✅ → Phase 2(equipment_seq/display_no 后端 + 启动 RenumberAllSeq) ✅ commit `18ed98f` → Phase 3(Excel Parser 重构) ✅ commit `14fd6e6` → **Phase 4(Excel Importer) ✅ 本次**。
 - v1.1 Phase 3（Parser）要点：F 列逐 token 分类（编号原样保留可中文/重复=多台真机展开不 BLOCK；"无编号"按数量展开；描述文本→无编号+原文备注；无法判断→REVIEW 人工确认前该组不导入，绝不静默丢）；真实 Excel 审计：198 组/D 2147 = 编号 1580 + 无编号 567（含描述 1），组级数量自洽、无 mismatch；重复编号降为 WARN 后真实文件可全量导入 2147 台（原 V3 把平车 670 台误 BLOCK）。
+- v1.1 Phase 4（Importer）要点：V004 迁移新增 `import_batch` 表与 equipment 来源列（import_batch_id/source_key）；导入=单事务（批次→类别→设备行→逐台 IMPORT_INIT→回填批次计数→事务内 RenumberAllSeq→audit）；设备级展开每 token 一台（同号多台真机 seq 1..n）、无编号逐台展开；同文件指纹幂等（ErrBatchImported）、非空库守卫（ErrDBNotEmpty）；真实 Excel 导入 2147 台全绿，batch/seq/source_key 断言通过。
 - 基线（v1.0.0，2026-09-08）：Phase 0–6 完成，tag v1.0.0；发布构建脚本产出 `release/equipment/`；用户手册/FAQ/Win7 浏览器说明就绪；Win7 实机 0xc0000005 问题待用户回传 EQ_STEPLOG。
-- 最终验收待办（目标电脑）：① Win10/11 全流程走查；② Win7 SP1 实机回归（需 Chrome109/FF115）；③ 首次导入《设备借出总账.xlsx》；④ Chrome109 离线包放入 install/；⑤ v1.1 全流程（Preview/Review→清空重导→对账）验收。
+- 最终验收待办（目标电脑）：① Win10/11 全流程走查；② Win7 SP1 实机回归（需 Chrome109/FF115）；③ Chrome109 离线包放入 install/；④ v1.1 全流程（Borrow历史日期→J列事件→状态推导→display_no→Preview/Review→清空重导→对账→回归→文档）验收。

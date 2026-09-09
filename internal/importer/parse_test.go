@@ -116,7 +116,7 @@ func openMigratedDB(t *testing.T, name string) *gorm.DB {
 	return db
 }
 
-// TestImportRealFile 真实文件导入：单事务写入、初始流转记录、编号/无编号台账。
+// TestImportRealFile 真实文件导入：单事务写入、初始流转记录、编号/无编号台账、批次与 seq。
 func TestImportRealFile(t *testing.T) {
 	res := parseRealFile(t)
 	res.Filename = "设备借出总账.xlsx"
@@ -132,8 +132,9 @@ func TestImportRealFile(t *testing.T) {
 	if report.Imported <= 0 {
 		t.Fatalf("导入台数异常: %d", report.Imported)
 	}
-	if report.BlockGroups == 0 {
-		t.Log("提示：本次未命中任何 BLOCK 分组（源数据重复疑点未触发）")
+	// 决策 18：真实文件重复编号不再 BLOCK → 全量可导入 2147 台
+	if report.BlockGroups != 0 || report.Skipped != 0 {
+		t.Fatalf("决策 18 下真实文件不应有 BLOCK/跳过: block=%d skip=%d", report.BlockGroups, report.Skipped)
 	}
 	if report.Unnumbered != 567 {
 		t.Fatalf("导入无编号台数应为 567，实际 %d", report.Unnumbered)
@@ -160,6 +161,9 @@ func TestImportRealFile(t *testing.T) {
 	if !eq.CurrentSince.Valid {
 		t.Fatal("6061 current_since 不应为空（交付时间口径）")
 	}
+	if eq.SourceKey == "" || eq.ImportBatchID == nil || *eq.ImportBatchID != report.BatchID {
+		t.Fatalf("设备 6061 应带来源批次与 source_key: key=%q batch=%v", eq.SourceKey, eq.ImportBatchID)
+	}
 	var cat models.Category
 	if err := db.First(&cat, eq.CategoryID).Error; err != nil {
 		t.Fatalf("类别缺失: %v", err)
@@ -185,6 +189,39 @@ func TestImportRealFile(t *testing.T) {
 	db.Model(&models.AuditLog{}).Where("action = ?", "IMPORT").Count(&audit)
 	if audit != 1 {
 		t.Fatalf("应写入 1 条 IMPORT audit，实际 %d", audit)
+	}
+	// 批次记录（决策 18 §二十五）
+	if report.BatchID == 0 || report.SourceHash == "" {
+		t.Fatalf("导入报告应含 batch_id 与 source_hash: %+v", report)
+	}
+	var batch models.ImportBatch
+	if err := db.First(&batch, report.BatchID).Error; err != nil {
+		t.Fatalf("import_batch 缺失: %v", err)
+	}
+	if batch.SourceHash != res.SourceHash || batch.ImportedCount != report.Imported {
+		t.Fatalf("import_batch 内容异常: %+v", batch)
+	}
+	// 全部设备应有非 0 equipment_seq（事务内 RenumberAllSeq 已执行）
+	var zeroSeq int64
+	db.Model(&models.Equipment{}).Where("equipment_seq = 0").Count(&zeroSeq)
+	if zeroSeq != 0 {
+		t.Fatalf("导入后不应存在 equipment_seq=0 的设备: %d", zeroSeq)
+	}
+	// 同号多台真机（决策 18）：平车 DDL-9000B 某重复号应 seq 1..n 且内部码不同
+	var dup models.Equipment
+	if err := db.Where("equipment_no = ? AND name = ? AND model = ?", "11472", "平车", "DDL-9000B").First(&dup).Error; err != nil {
+		t.Logf("提示：11472 未找到（不影响断言）")
+	} else {
+		var ids []uint
+		db.Model(&models.Equipment{}).Where("equipment_no = ? AND name = ? AND model = ?", "11472", "平车", "DDL-9000B").
+			Order("equipment_seq ASC").Pluck("id", &ids)
+		if len(ids) < 2 {
+			t.Fatalf("11472 应有多台（同号真机），实际 %d 台", len(ids))
+		}
+	}
+	// 幂等（§二十六）：同文件再次导入 → ErrBatchImported
+	if _, err := Import(db, res); !errors.Is(err, ErrBatchImported) {
+		t.Fatalf("同文件二次导入应 ErrBatchImported，实际 %v", err)
 	}
 }
 
@@ -358,9 +395,38 @@ func TestImportV11DuplicateExpansion(t *testing.T) {
 	if n != 4 {
 		t.Fatalf("6041 应 4 台，实际 %d", n)
 	}
+	// 同号 4 台的 equipment_seq 应 1..4（事务内 RenumberAllSeq，决策18 §七）
+	var seqs []int
+	db.Model(&models.Equipment{}).Where("equipment_no = ?", "6041").
+		Order("id ASC").Pluck("equipment_seq", &seqs)
+	if len(seqs) != 4 || seqs[0] != 1 || seqs[3] != 4 {
+		t.Fatalf("6041 seq 应为 [1 2 3 4]，实际 %v", seqs)
+	}
+	// 无编号 seq：缝制熨斗/JUKI DDL-8700 → 1..2（按 model 分组）
+	var useqs []int
+	db.Model(&models.Equipment{}).Where("equipment_no IS NULL AND name = ? AND model = ?", "缝制熨斗", "JUKI DDL-8700").
+		Order("id ASC").Pluck("equipment_seq", &useqs)
+	if len(useqs) != 2 || useqs[0] != 1 || useqs[1] != 2 {
+		t.Fatalf("无编号 seq 应为 [1 2]，实际 %v", useqs)
+	}
 	var un int64
 	db.Model(&models.Equipment{}).Where("equipment_no IS NULL AND name = ? AND model = ?", "缝制熨斗", "JUKI DDL-8700").Count(&un)
 	if un != 2 {
 		t.Fatalf("无编号应 2 台，实际 %d", un)
+	}
+	// source key 与批次（决策18 §二十五/四十）
+	var src int64
+	db.Model(&models.Equipment{}).Where("import_batch_id = ? AND source_key <> ''", report.BatchID).Count(&src)
+	if src != 6 {
+		t.Fatalf("6 台设备应全部带批次来源键，实际 %d", src)
+	}
+	// 幂等（§二十六）：同 ParseResult 再导 → ErrBatchImported（库非空先命中批次指纹）
+	if _, err := Import(db, res); !errors.Is(err, ErrBatchImported) {
+		t.Fatalf("同文件二次导入应 ErrBatchImported，实际 %v", err)
+	}
+	// 不同文件（换文件名与 SourceHash）再导入 → 空库守卫 ErrDBNotEmpty
+	res2 := &ParseResult{Filename: "other.xlsx", SourceHash: "ffffffff", Groups: res.Groups}
+	if _, err := Import(db, res2); !errors.Is(err, ErrDBNotEmpty) {
+		t.Fatalf("非空库导入应 ErrDBNotEmpty，实际 %v", err)
 	}
 }
