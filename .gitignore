@@ -45,3 +45,6 @@ Thumbs.db
 
 # 发布产物目录（脚本生成，不入库）
 release/
+
+# api 包测试运行时由 runtimeDBInfo 生成（config.Load 副作用）
+internal/api/config.yaml
