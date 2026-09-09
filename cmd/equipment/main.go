@@ -25,18 +25,35 @@ import (
 var version = "1.1.0"
 
 // step 现场诊断探针：设 EQ_STEPLOG=1 时每步向控制台打印标记，用于定位启动早期崩溃。
+// diag 构建（-tags diag）默认开启，并额外将每一步实时写入 diag-step.log（崩溃/窗口消失后可回传）。
 func step(msg string) {
-	if os.Getenv("EQ_STEPLOG") == "1" {
+	if diagMode() || os.Getenv("EQ_STEPLOG") == "1" {
 		fmt.Fprintln(os.Stderr, "[step] "+msg)
 	}
+	diagWriteStep(msg)
 }
 
 func main() {
+	// 兜底：把 Go panic（含启动早期 panic）记入 stderr 与诊断日志后退出。
+	defer func() {
+		if r := recover(); r != nil {
+			msg := fmt.Sprintf("PANIC: %v", r)
+			fmt.Fprintln(os.Stderr, msg)
+			diagWriteStep(msg)
+			diagFinalize()
+			os.Exit(2)
+		}
+	}()
+	diagStartup(version)
 	step("main: 开始")
 	if err := run(); err != nil {
+		diagWriteStep("启动失败: " + err.Error())
 		fmt.Fprintln(os.Stderr, "启动失败:", err)
+		diagFinalize()
 		os.Exit(1)
 	}
+	diagWriteStep("正常退出")
+	diagFinalize()
 }
 
 func run() error {
@@ -68,6 +85,8 @@ func run() error {
 		return err
 	}
 	logger.Info("数据库迁移完成: %s", cfg.DBFile)
+	step("迁移后数据库状态上报")
+	diagReportDB(sqlDB)
 
 	// 决策 18：启动时全量重算 equipment_seq（幂等；覆盖存量数据与组内漂移）
 	step("重算 equipment_seq")
@@ -86,6 +105,7 @@ func run() error {
 	}
 
 	step("组装路由")
+	diagReportConfig(cfg)
 	router := api.New(db, version)
 
 	step("监听端口")
