@@ -1,5 +1,5 @@
 // Package importer 实现 Excel 初始化导入（Tier 1：设备台账）。
-// 规则依据：docs/import-rules.md 与决策基线 15/16。
+// 规则依据：docs/import-rules.md 与决策基线 15/16/18（v1.1）。
 package importer
 
 import (
@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -37,18 +38,36 @@ const (
 	operatorImport   = "系统导入"
 	statusInStock    = "IN_STOCK"
 	actionImportInit = "IMPORT_INIT"
+	// Issue 级别：BLOCK（阻断）/ WARN（提示，可导入）/ REVIEW（需人工确认，决策18 §六C）。
+	IssueLevelReview = "REVIEW"
 )
 
 // Issue 校验问题（V 系列，见 import-rules.md §4）。
 type Issue struct {
 	Row     int    `json:"row"`
 	Code    string `json:"code"`  // V1..V10
-	Level   string `json:"level"` // BLOCK / WARN
+	Level   string `json:"level"` // BLOCK / WARN / REVIEW
 	Group   string `json:"group,omitempty"`
 	Message string `json:"message"`
 }
 
-// Group 设备分组 = 同 name+model（编号唯一粒度，决策 16）。
+// fTokenKind F 列单个编号单元的语义分类（决策 18 §五/§六）。
+type fTokenKind int
+
+const (
+	// tkNumber 明显设备编号：equipment_no 原样保留（可含中文/字母/横杠等）。
+	tkNumber fTokenKind = iota
+	// tkNoNumber 显式“无编号”标记。
+	tkNoNumber
+	// tkDesc 明显描述文本（如“拉布机配件”）：equipment_no=NULL + remark 原文。
+	tkDesc
+	// tkReview 无法自动判断（情况 C）：不猜不丢，REVIEW 由用户在 Preview 人工确认。
+	tkReview
+)
+
+// Group 设备分组 = 同 name+model 的源行聚合。
+// 决策 18：equipment_no 不再是唯一键；组内 Numbers 允许重复（每 token 一台真机，
+// 同号多台以 equipment_seq 区分）。分组仅用于聚合台账数量与归类，身份一律在设备行。
 type Group struct {
 	Key         string   `json:"key"`
 	Category    string   `json:"category"`
@@ -58,11 +77,12 @@ type Group struct {
 	RowTo       int      `json:"row_to"`
 	DSum        int      `json:"d_sum"`       // 台账数量（源 D 合计）
 	ESum        int      `json:"e_sum"`       // 财务数量（源 E 合计，仅供参考）
-	Numbers     []string `json:"numbers"`     // 编号清单（按出现顺序）
-	Unnumbered  int      `json:"unnumbered"`  // 无编号台数
+	Numbers     []string `json:"numbers"`     // 编号清单（按出现顺序，允许重复）
+	Unnumbered  int      `json:"unnumbered"`  // 无编号台数（含描述文本设备）
 	DescRemark  string   `json:"desc_remark"` // 描述文本充当编号时的原文备注
 	HasNumericD bool     `json:"has_numeric_d"`
-	OK          bool     `json:"ok"` // 是否通过 BLOCK 校验可导入
+	ReviewN     int      `json:"review_n"` // 需人工确认(情况C)的设备台数
+	OK          bool     `json:"ok"`       // 是否通过 BLOCK 校验可导入
 }
 
 // ParseResult 一次解析的结果。
@@ -73,6 +93,7 @@ type ParseResult struct {
 	Groups    []*Group `json:"groups"`
 	Issues    []Issue  `json:"issues"`
 	TotalD    int      `json:"total_d"` // 源台账数量合计
+	ReviewN   int      `json:"review_n"`
 	BlankRows []int    `json:"blank_rows,omitempty"`
 }
 
@@ -222,49 +243,78 @@ func Parse(path string) (*ParseResult, error) {
 			}
 			continue
 		}
-		if isNoNumberOnly(tokens) {
+		// 决策 18/§五：逐 token 分类——编号原样保留、无编号显式标记、描述文本→无编号+原文备注、
+		// 无法自动判断→REVIEW 人工确认（绝不静默丢弃）。
+		rowNumbers := 0 // 本行判为编号的 token 数
+		rowDesc := 0    // 本行判为描述文本的 token 数
+		rowDescText := []string{}
+		rowNoNumber := false // 本行是否显式标注“无编号”
+		for _, t := range tokens {
+			main, ann := splitAnnotation(t)
+			kind, why := classifyF(main)
+			switch kind {
+			case tkNumber:
+				rowNumbers++
+				if strings.ContainsAny(main, "Oo") {
+					res.Issues = append(res.Issues, Issue{Row: r, Code: "V5", Level: "WARN", Group: key,
+						Message: fmt.Sprintf("编号 %q 含字母 O，疑似 0/O 录入混淆，请人工核对", main)})
+				}
+				// 原样保留（含中文/字母/符号；重复即多台真机，不入唯一性校验）
+				g.Numbers = append(g.Numbers, main)
+				if ann != "" {
+					g.DescRemark = joinRemark(g.DescRemark, fmt.Sprintf("%s%s", main, ann))
+					res.Issues = append(res.Issues, Issue{Row: r, Code: "V10", Level: "WARN", Group: key,
+						Message: fmt.Sprintf("编号 %q 附带注释 %q（已并入备注）", main, ann)})
+				}
+			case tkNoNumber:
+				rowNoNumber = true
+			case tkDesc:
+				rowDesc++
+				rowDescText = append(rowDescText, t)
+				// 情况 B：描述文本 → equipment_no=NULL，原文进 remark（决策18 §六B）
+			case tkReview:
+				g.ReviewN++
+				res.ReviewN++
+				res.Issues = append(res.Issues, Issue{Row: r, Code: "V10", Level: IssueLevelReview, Group: key,
+					Message: fmt.Sprintf("无法自动判断的编号内容 %q（%s），请在预览中人工确认：作为编号或作为无编号设备", t, why)})
+			}
+		}
+		// 显式“无编号”且无任何编号 token：整行按台账数量(缺省 1)记无编号
+		if rowNoNumber && rowNumbers == 0 && rowDesc == 0 {
 			if dOwn == 0 {
-				dOwn = 1 // 标了无编号却没有数量：按 1 台处理并提示
+				dOwn = 1
 				res.Issues = append(res.Issues, Issue{Row: r, Code: "V6", Level: "WARN", Group: key,
 					Message: "标注无编号但台账数量为空，按 1 台处理"})
 			}
 			g.Unnumbered += dOwn
 			continue
 		}
-		// 整行均为描述文本（如“拉布机配件”）：按无编号处理，原文入备注（V10 WARN）
-		allDesc := true
-		for _, t := range tokens {
-			m, _ := splitAnnotation(t)
-			if !containsCJK(m) {
-				allDesc = false
-				break
+		// 描述文本与编号同现：描述按文本条数 1 台记无编号（原文保留，避免静默丢）
+		if rowDesc > 0 {
+			for _, tx := range rowDescText {
+				g.DescRemark = joinRemark(g.DescRemark, tx)
 			}
-		}
-		if allDesc {
-			d := dOwn
-			if d == 0 {
-				d = 1
-			}
-			g.Unnumbered += d
-			g.DescRemark = strings.TrimSpace(g.DescRemark + " " + strings.Join(tokens, " "))
-			res.Issues = append(res.Issues, Issue{Row: r, Code: "V10", Level: "WARN", Group: key,
-				Message: fmt.Sprintf("编号位置为描述文本 %q，按 %d 台无编号处理（原文保留到备注）", strings.Join(tokens, " "), d)})
-			continue
-		}
-		// 编号行：逐 token 剥离括号注释 / 检出 0-O / 检出混合描述
-		for _, t := range tokens {
-			main, _ := splitAnnotation(t)
-			if containsCJK(main) {
-				g.OK = false
-				res.Issues = append(res.Issues, Issue{Row: r, Code: "V10", Level: "BLOCK", Group: key,
-					Message: fmt.Sprintf("编号与描述混排 %q，需人工修正", t)})
+			if rowNumbers == 0 {
+				d := dOwn
+				if d == 0 {
+					d = rowDesc
+				}
+				g.Unnumbered += d
+				res.Issues = append(res.Issues, Issue{Row: r, Code: "V10", Level: "WARN", Group: key,
+					Message: fmt.Sprintf("编号位置为描述文本 %q，按 %d 台无编号处理（原文保留到备注）", strings.Join(rowDescText, " "), d)})
 				continue
 			}
-			if strings.ContainsAny(main, "Oo") {
-				res.Issues = append(res.Issues, Issue{Row: r, Code: "V5", Level: "WARN", Group: key,
-					Message: fmt.Sprintf("编号 %q 含字母 O，疑似 0/O 录入混淆，请人工核对", main)})
-			}
-			g.Numbers = append(g.Numbers, main)
+			// 编号与描述混排：描述逐条记 1 台，编号照常
+			g.Unnumbered += rowDesc
+			res.Issues = append(res.Issues, Issue{Row: r, Code: "V10", Level: "WARN", Group: key,
+				Message: fmt.Sprintf("编号与描述文本混排：描述 %q 按 %d 台无编号处理（原文保留到备注）", strings.Join(rowDescText, " "), rowDesc)})
+		}
+		if rowNoNumber && rowNumbers > 0 {
+			// 显式“无编号”与编号同现属异常，REVIEW 交人工（不猜）
+			g.ReviewN++
+			res.ReviewN++
+			res.Issues = append(res.Issues, Issue{Row: r, Code: "V10", Level: IssueLevelReview, Group: key,
+				Message: "同一行同时出现编号与“无编号”标注，语义冲突，请在预览中人工确认"})
 		}
 	}
 
@@ -274,12 +324,79 @@ func Parse(path string) (*ParseResult, error) {
 		res.Groups = append(res.Groups, groupByKey[k])
 	}
 
-	// 3) 分组级校验（V1/V3/V4 语义按决策 16：同 name+model 内唯一）
+	// 3) 分组级校验（决策 18：重复不再 BLOCK；数量一致性 BLOCK）
 	validateGroups(res)
 	return res, nil
 }
 
+// joinRemark 累积多段备注文本（空格分隔，去重防重复拼接）。
+func joinRemark(existing, add string) string {
+	if existing == "" {
+		return add
+	}
+	return existing + " " + add
+}
+
+// classifyF 对 F 列单个编号单元（已剥离括号注释的主体）做语义分类。
+// 规则（决策 18 §五/§六，不猜测、不因含中文而拒绝）：
+//   - 明显编号：含字母/数字/横杠/下划线等编号形态（如 6041、001、A01、JUKI-8700、
+//     车间A-01、缝制A-02、ABC-001）。规则：主体含 ASCII 字母/数字即为编号
+//     （编号可带中文前缀，如“车间A-01”）；纯中文若以“号/编号”收尾（设备一号、
+//     中文编号）也按编号保留。
+//   - “无编号”→ 显式标记。
+//   - 明显描述：纯汉字名词短语（如“拉布机配件”“拖布轮”）→ 描述（情况 B，
+//     equipment_no=NULL，原文进 remark）。
+//   - 其余（纯符号、无法归类的纯中文、空）→ REVIEW 无法自动判断（情况 C，人工确认）。
+func classifyF(main string) (fTokenKind, string) {
+	m := strings.TrimSpace(main)
+	if m == "" {
+		return tkReview, "主体为空"
+	}
+	if m == tokenNoNumber {
+		return tkNoNumber, ""
+	}
+	hasHan := false
+	hasASCII := false
+	for _, r := range m {
+		if unicode.Is(unicode.Han, r) {
+			hasHan = true
+		} else if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			hasASCII = true
+		}
+	}
+	if hasASCII {
+		return tkNumber, "" // 编号（可带中文前缀/后缀，决策18 §五）
+	}
+	if !hasHan {
+		return tkReview, "既无汉字也无字母数字，无法判断" // 纯符号
+	}
+	// 纯中文：
+	if strings.HasSuffix(m, "号") || strings.HasSuffix(m, "编号") {
+		return tkNumber, "" // 设备一号 / 中文编号（§六 情况A）
+	}
+	if looksLikeDescription(m) {
+		return tkDesc, "" // 拉布机配件 / 拖布轮（§六 情况B）
+	}
+	return tkReview, "纯中文内容无法可靠判断为编号或描述"
+}
+
+// looksLikeDescription 纯中文名词短语的启发式判断（情况 B 例子：拉布机配件、拖布轮）。
+// 仅对明显名词短语收尾词生效；不在清单内的一律 REVIEW 交人工，绝不猜。
+func looksLikeDescription(m string) bool {
+	n := utf8.RuneCountInString(m)
+	if n < 2 {
+		return false
+	}
+	for _, suf := range []string{"配件", "备件", "附件", "零件", "部件", "机件", "托板", "拖布轮", "轮", "刀", "针"} {
+		if strings.HasSuffix(m, suf) {
+			return true
+		}
+	}
+	return false
+}
+
 // validateGroups 分组级校验并标记 OK/BLOCK。
+// 决策 18：同组重复编号 = 多台真机 → 仅 WARN 提示（不再 BLOCK）；数量不一致仍 BLOCK。
 func validateGroups(res *ParseResult) {
 	for _, g := range res.Groups {
 		g.OK = true
@@ -287,13 +404,13 @@ func validateGroups(res *ParseResult) {
 			res.Issues = append(res.Issues, Issue{Row: g.RowFrom, Code: "V6", Level: "WARN", Group: g.Key,
 				Message: "该组整组缺少台账数量(D)列，将按编号数导入"})
 		}
-		// 同组内重复编号（V3，决策 16：BLOCK）
+		// 同组内重复编号（V3，决策 18：多台真机，正常展开，仅提示不阻断）
 		seen := map[string]int{}
 		for _, n := range g.Numbers {
 			seen[n]++
 		}
-		var dups []string
 		dupOcc := 0
+		var dups []string
 		for n, c := range seen {
 			if c > 1 {
 				dups = append(dups, n)
@@ -302,20 +419,24 @@ func validateGroups(res *ParseResult) {
 		}
 		if len(dups) > 0 {
 			sort.Strings(dups)
-			g.OK = false
-			res.Issues = append(res.Issues, Issue{Row: g.RowFrom, Code: "V3", Level: "BLOCK", Group: g.Key,
-				Message: fmt.Sprintf("同组重复编号 %d 个（多录 %d 次）：%s —— 请人工处理（改号或确认为两台同号机）",
-					len(dups), dupOcc, strings.Join(dups, "、"))})
+			res.Issues = append(res.Issues, Issue{Row: g.RowFrom, Code: "V3", Level: "WARN", Group: g.Key,
+				Message: fmt.Sprintf("同组出现重复编号 %d 个（共多录 %d 次）：%s —— 按同号多台真机展开（display 以 %s（n）区分），如需合并请人工核对",
+					len(dups), dupOcc, strings.Join(dups, "、"), dups[0])})
 		}
-		// 数量一致性（V1）：期望 D 合计 vs 实际 编号数+无编号
+		// 数量一致性（V1，§十二）：D 台账数量 与 展开数（编号+无编号+REVIEW）不一致才 BLOCK
 		actual := len(g.Numbers) + g.Unnumbered
 		if g.HasNumericD && actual != g.DSum {
-			// 有重复时已 BLOCK；此处仅对非重复情形提示偏差
-			if len(dups) == 0 {
-				g.OK = false
-				res.Issues = append(res.Issues, Issue{Row: g.RowFrom, Code: "V1", Level: "BLOCK", Group: g.Key,
-					Message: fmt.Sprintf("台账数量 %d 与 实际编号(%d)+无编号(%d)=%d 不一致", g.DSum, len(g.Numbers), g.Unnumbered, actual)})
-			}
+			g.OK = false
+			res.Issues = append(res.Issues, Issue{Row: g.RowFrom, Code: "V1", Level: "BLOCK", Group: g.Key,
+				Message: fmt.Sprintf("台账数量 %d 与 展开设备数（编号%d+无编号%d+待确认%d=%d）不一致",
+					g.DSum, len(g.Numbers), g.Unnumbered, g.ReviewN, actual+g.ReviewN)})
+		}
+		// REVIEW（§六C）在 Preview 人工确认流程(Phase 9)落地前不可自动导入：
+		// 宁可整组跳过列入报告，也绝不静默丢弃待确认内容（§十六）。
+		if g.ReviewN > 0 {
+			g.OK = false
+			res.Issues = append(res.Issues, Issue{Row: g.RowFrom, Code: "V10", Level: IssueLevelReview, Group: g.Key,
+				Message: fmt.Sprintf("该组有 %d 项编号内容需人工确认（REVIEW），确认前暂不导入该组，请对照上方明细在预览中确认或修正 Excel", g.ReviewN)})
 		}
 		// 财务数量一致性（V2，仅提示）
 		if g.HasNumericD && g.ESum != 0 && g.DSum != g.ESum {
@@ -330,19 +451,6 @@ func splitTokens(s string) []string {
 	return strings.FieldsFunc(s, func(r rune) bool { return unicode.IsSpace(r) })
 }
 
-func isNoNumberOnly(tokens []string) bool {
-	if len(tokens) == 1 {
-		return tokens[0] == tokenNoNumber
-	}
-	// 允许 '无编号' 与空混排场景仅剩 token
-	for _, t := range tokens {
-		if strings.TrimSpace(t) != "" {
-			return false
-		}
-	}
-	return false
-}
-
 // splitAnnotation 剥离编号中的括号注释（全半角）。返回主体与注释。
 func splitAnnotation(t string) (string, string) {
 	idx := strings.IndexAny(t, "（(")
@@ -350,13 +458,4 @@ func splitAnnotation(t string) (string, string) {
 		return t, ""
 	}
 	return t[:idx], t[idx:]
-}
-
-func containsCJK(s string) bool {
-	for _, r := range s {
-		if unicode.Is(unicode.Han, r) {
-			return true
-		}
-	}
-	return false
 }

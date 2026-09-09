@@ -97,7 +97,8 @@ type importSummary struct {
 	BlockDevs   int    `json:"block_devs"`   // 被阻塞台数
 	Blocks      int    `json:"blocks"`       // BLOCK 级问题条数
 	Warnings    int    `json:"warnings"`     // WARN 级问题条数
-	Duplicates  int    `json:"duplicates"`   // 重复编号多录次数
+	Reviews     int    `json:"reviews"`      // REVIEW 级问题条数（需人工确认）
+	Duplicates  int    `json:"duplicates"`   // 重复编号多录次数（同号多台真机，展开导入）
 	Unnumbered  int    `json:"unnumbered"`   // 可导入中的无编号台数
 }
 
@@ -179,9 +180,12 @@ func buildSummary(res *importer.ParseResult) importSummary {
 	}
 	s.Duplicates = dup
 	for _, is := range res.Issues {
-		if is.Level == "BLOCK" {
+		switch is.Level {
+		case "BLOCK":
 			s.Blocks++
-		} else {
+		case importer.IssueLevelReview:
+			s.Reviews++
+		default:
 			s.Warnings++
 		}
 	}

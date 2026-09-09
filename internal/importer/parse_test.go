@@ -3,11 +3,13 @@ package importer
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"equipment/internal/database"
 	"equipment/internal/models"
 
+	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
 )
 
@@ -25,6 +27,7 @@ func parseRealFile(t *testing.T) *ParseResult {
 }
 
 // TestParseRealFileInvariants 真实文件解析不变量（对照 Phase 0 统计）。
+// v1.1（决策 18）：重复编号不再 BLOCK（WARN + 展开）；描述文本按无编号+备注。
 func TestParseRealFileInvariants(t *testing.T) {
 	res := parseRealFile(t)
 	if res.Sheet == "" {
@@ -55,26 +58,39 @@ func TestParseRealFileInvariants(t *testing.T) {
 		t.Fatalf("环形割刀编号异常: %v", found.Numbers)
 	}
 
-	// 存在描述文本充当编号的 V10 WARN（R16 拉布机配件）
-	hasV10 := false
-	// 存在同组重复编号的 V3 BLOCK（源数据疑似重复）
-	hasV3 := false
+	hasV10Warn := false
+	hasV3Warn := false
+	hasBlock := false
+	hasReview := false
 	for _, is := range res.Issues {
-		if is.Code == "V10" {
-			hasV10 = true
-		}
-		if is.Code == "V3" {
-			hasV3 = true
+		switch {
+		case is.Level == "BLOCK":
+			hasBlock = true
+		case is.Level == IssueLevelReview:
+			hasReview = true
+		case is.Code == "V10":
+			hasV10Warn = true
+		case is.Code == "V3":
+			hasV3Warn = true
 		}
 	}
-	if !hasV10 {
-		t.Error("缺少 V10（描述文本充当编号）问题记录")
+	// 描述文本充当编号（R16 拉布机配件）→ V10 WARN（不 BLOCK）
+	if !hasV10Warn {
+		t.Error("缺少 V10 WARN（描述文本充当编号）问题记录")
 	}
-	if !hasV3 {
-		t.Error("缺少 V3（同组重复编号）问题记录——源数据应存在疑似重复")
+	// 真实文件存在同组重复编号（平车组个别号多录）→ 决策 18 后为 WARN（展开），不再 BLOCK
+	if !hasV3Warn {
+		t.Error("缺少 V3 WARN（同组重复编号）问题记录")
+	}
+	// 决策 18：真实文件不应因重复编号 BLOCK；也不应出现 REVIEW（全部可判定）
+	if hasBlock {
+		t.Error("决策 18 下真实文件不应再出现 BLOCK 级阻断（重复=多台真机）")
+	}
+	if hasReview {
+		t.Error("真实文件不应出现 REVIEW（F 列内容应全部可判定）")
 	}
 
-	// 无编号台数合计 567 = 566（F 列"无编号"85 行） + 1（R16 描述文本"拉布机配件"）
+	// 无编号台数合计 567 = 566（F 列"无编号"按 D 展开） + 1（R16 描述文本"拉布机配件"）
 	un := 0
 	for _, g := range res.Groups {
 		un += g.Unnumbered
@@ -188,5 +204,163 @@ func TestImportGuardNonEmpty(t *testing.T) {
 	_, err := Import(db, res)
 	if !errors.Is(err, ErrDBNotEmpty) {
 		t.Fatalf("期望 ErrDBNotEmpty，实际 %v", err)
+	}
+}
+
+// TestClassifyF 决策 18 §五/§六：F 列编号单元分类。
+func TestClassifyF(t *testing.T) {
+	cases := []struct {
+		in   string
+		want fTokenKind
+	}{
+		{"6041", tkNumber}, {"001", tkNumber}, {"A01", tkNumber}, {"JUKI-8700", tkNumber},
+		{"ABC-001", tkNumber}, {"车间A-01", tkNumber}, {"缝制A-02", tkNumber},
+		{"设备一号", tkNumber}, {"中文编号", tkNumber}, // 情况 A 中文编号（含“号”收尾）
+		{"无编号", tkNoNumber},
+		{"拉布机配件", tkDesc}, {"拖布轮", tkDesc}, // 情况 B 明显描述
+		{"", tkReview}, {"①②③", tkReview}, {"精密台面", tkReview}, // 情况 C 无法判断
+	}
+	for _, c := range cases {
+		got, _ := classifyF(c.in)
+		if got != c.want {
+			t.Errorf("classifyF(%q)=%v want %v", c.in, got, c.want)
+		}
+	}
+}
+
+// writeMiniXLSX 生成一个最小 xlsx（无合并单元格），R2 表头、R5 起数据。
+func writeMiniXLSX(t *testing.T, rows [][]string) string {
+	t.Helper()
+	f := excelize.NewFile()
+	sheet := "Sheet1"
+	headers := []string{"类别", "设备名称", "设备型号", "台账数量", "财务数量", "台账设备编号", "时间", "公司", "台数", "借出设备编号", "备注"}
+	for i, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 2)
+		if err := f.SetCellStr(sheet, cell, h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for ri, r := range rows {
+		for ci, v := range r {
+			cell, _ := excelize.CoordinatesToCellName(ci+1, sheetDataStart+ri)
+			if err := f.SetCellStr(sheet, cell, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	path := filepath.Join(t.TempDir(), "mini.xlsx")
+	if err := f.SaveAs(path); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestParseV11Semantics 决策 18 解析语义（Test 1/2/3/4）：
+// 重复编号展开不 BLOCK、无编号按数量展开、中文编号保留、描述文本→无编号+备注。
+func TestParseV11Semantics(t *testing.T) {
+	rows := [][]string{
+		{"缝纫设备", "平缝机", "M1", "4", "", "6041 6041 6041 6041"}, // Test1 同号 4 台真机
+		{"缝纫设备", "缝制熨斗", "JUKI DDL-8700", "3", "", "无编号"},     // Test2 无编号展开 3
+		{"裁剪设备", "裁床", "CUT-1", "1", "", "车间A-01"},            // Test3 中文编号保留
+		{"裁剪设备", "程控器", "FX2NC", "1", "", "拉布机配件"},            // Test4 描述文本→无编号
+		{"技术设备", "打样机", "P-9", "1", "", "精密台面"},               // 情况 C REVIEW
+	}
+	path := writeMiniXLSX(t, rows)
+	res, err := Parse(path)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if res.TotalD != 10 {
+		t.Fatalf("台账数量合计应为 10，实际 %d", res.TotalD)
+	}
+	byKey := map[string]*Group{}
+	for _, g := range res.Groups {
+		byKey[g.Key] = g
+	}
+	// 平缝机/M1：Numbers 应为 4 个 6041（重复展开、允许），组 OK
+	g := byKey["平缝机\x00M1"]
+	if g == nil {
+		t.Fatal("缺少 平缝机/M1 分组")
+	}
+	if len(g.Numbers) != 4 {
+		t.Fatalf("6041 应展开 4 台，实际 %v", g.Numbers)
+	}
+	for _, n := range g.Numbers {
+		if n != "6041" {
+			t.Fatalf("重复展开编号异常: %q", n)
+		}
+	}
+	if !g.OK {
+		t.Fatal("重复编号不应 BLOCK 该组（决策18）")
+	}
+	// 无编号展开：缝制熨斗/JUKI DDL-8700 → Unnumbered 3
+	g = byKey["缝制熨斗\x00JUKI DDL-8700"]
+	if g == nil || g.Unnumbered != 3 || !g.OK {
+		t.Fatalf("无编号展开异常: %+v", g)
+	}
+	// 中文编号原样保留
+	g = byKey["裁床\x00CUT-1"]
+	if g == nil || len(g.Numbers) != 1 || g.Numbers[0] != "车间A-01" || !g.OK {
+		t.Fatalf("中文编号应原样保留: %+v", g)
+	}
+	// 描述文本→无编号+原文备注
+	g = byKey["程控器\x00FX2NC"]
+	if g == nil || g.Unnumbered != 1 || !strings.Contains(g.DescRemark, "拉布机配件") {
+		t.Fatalf("描述文本应转无编号并保留原文: %+v", g)
+	}
+	if !g.OK {
+		t.Fatal("描述文本不应 BLOCK 该组（决策18 情况B）")
+	}
+	// REVIEW：纯中文无法判断 → 组不自动导入，REVIEW 计数 +1
+	g = byKey["打样机\x00P-9"]
+	if g == nil || g.ReviewN != 1 || g.OK {
+		t.Fatalf("REVIEW 组应标记不导入: %+v", g)
+	}
+	if res.ReviewN != 1 {
+		t.Fatalf("ParseResult.ReviewN 应为 1，实际 %d", res.ReviewN)
+	}
+	hasReviewIssue := false
+	for _, is := range res.Issues {
+		if is.Level == IssueLevelReview {
+			hasReviewIssue = true
+		}
+	}
+	if !hasReviewIssue {
+		t.Error("缺少 REVIEW 级问题")
+	}
+}
+
+// TestImportV11DuplicateExpansion 同号多台真机可完整导入（含重复展开与 seq）。
+func TestImportV11DuplicateExpansion(t *testing.T) {
+	rows := [][]string{
+		{"缝纫设备", "平缝机", "M1", "4", "", "6041 6041 6041 6041"},
+		{"缝纫设备", "缝制熨斗", "JUKI DDL-8700", "2", "", "无编号"},
+	}
+	path := writeMiniXLSX(t, rows)
+	res, err := Parse(path)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	db := openMigratedDB(t, "dup")
+	res.Filename = "mini.xlsx"
+	report, err := Import(db, res)
+	if err != nil {
+		t.Fatalf("导入失败: %v", err)
+	}
+	if report.Imported != 6 {
+		t.Fatalf("应导入 6 台（4 同号+2 无编号），实际 %d", report.Imported)
+	}
+	if report.Unnumbered != 2 || report.BlockGroups != 0 {
+		t.Fatalf("报告异常: un=%d block=%d", report.Unnumbered, report.BlockGroups)
+	}
+	var n int64
+	db.Model(&models.Equipment{}).Where("equipment_no = ?", "6041").Count(&n)
+	if n != 4 {
+		t.Fatalf("6041 应 4 台，实际 %d", n)
+	}
+	var un int64
+	db.Model(&models.Equipment{}).Where("equipment_no IS NULL AND name = ? AND model = ?", "缝制熨斗", "JUKI DDL-8700").Count(&un)
+	if un != 2 {
+		t.Fatalf("无编号应 2 台，实际 %d", un)
 	}
 }
