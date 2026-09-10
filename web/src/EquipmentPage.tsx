@@ -20,6 +20,8 @@ import {
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
+import FlowExportModal from './FlowExportModal';
+import { downloadFile } from './download';
 
 // ---------- 类型 ----------
 interface Category { id: number; name: string }
@@ -128,6 +130,8 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [correctOpen, setCorrectOpen] = useState(false);
+  const [flowExportOpen, setFlowExportOpen] = useState(false);
+  const [exportingLedger, setExportingLedger] = useState(false);
   const [flowAction, setFlowAction] = useState<string>('');
   const [flowSaving, setFlowSaving] = useState(false);
   const [formCreate] = Form.useForm();
@@ -194,6 +198,24 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
       message.error(e instanceof Error ? e.message : '加载详情失败');
     }
   }, [loadTxns]);
+
+  // 导出设备台账（沿用现有 API，带当前页面筛选条件）
+  const exportLedger = useCallback(async () => {
+    setExportingLedger(true);
+    try {
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (fCategory) params.set('category', String(fCategory));
+      if (fStatus) params.set('status', fStatus);
+      if (fTeam) params.set('team', String(fTeam));
+      await downloadFile(`/api/export/equipment?${params.toString()}`, '设备台账.xlsx');
+      message.success('台账导出成功');
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '台账导出失败');
+    } finally {
+      setExportingLedger(false);
+    }
+  }, [q, fCategory, fStatus, fTeam]);
 
   // 跨页请求：班组设备视图点击编号 → 复用本页详情抽屉（同 id 不重复触发）
   const lastOpenRef = useRef<number | null>(null);
@@ -371,8 +393,14 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
       <Card
         title="设备台账 / 流转"
         extra={
-          <Space>
+          <Space wrap>
             <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={loading}>刷新</Button>
+            <Button loading={exportingLedger} disabled={exportingLedger} onClick={() => void exportLedger()}>
+              导出设备台账
+            </Button>
+            <Button type="primary" onClick={() => setFlowExportOpen(true)}>
+              导出流转情况
+            </Button>
             <Button type="primary" icon={<PlusOutlined />}
               onClick={() => { formCreate.setFieldsValue({ operator: getOperator() }); setCreateOpen(true); }}>
               新增设备
@@ -564,6 +592,14 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
           <Form.Item name="operator" label="操作人" rules={[{ required: true, message: '必填' }]}><Input /></Form.Item>
         </Form>
       </Modal>
+
+      {/* 导出流转情况 */}
+      <FlowExportModal
+        open={flowExportOpen}
+        onClose={() => setFlowExportOpen(false)}
+        teams={teams}
+        borrowers={borrowers}
+      />
     </Space>
   );
 }
