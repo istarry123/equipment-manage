@@ -139,3 +139,37 @@ Get-Process equipment | Stop-Process -Force   # 关掉旧的程序实例
 - 筛选条件同时作用于三个工作表：例如选「外借公司 = 莒县双发」，Sheet1 只列当前借给莒县双发的设备，Sheet2 只列这些设备的历史，Sheet3 统计范围一致。
 - 编号一律按**文本**导出（`001` 不会被 Excel 变成 `1`，中文编号原样保留）；设备ID列默认隐藏，仅用于核对。
 - 数据以数据库为准（当前状态来自 equipment，历史来自流转记录），**不重读原始 Excel**；每次导出会记录一条审计（`EXPORT_EQUIPMENT_FLOW`，含筛选条件与导出数量）。
+
+## 9. 版本升级（只换程序，保留数据）
+
+> 已有数据的目标电脑升级时，**绝对不要整体覆盖程序目录**——那会用新版压缩包里的空库覆盖你的真实数据。
+
+程序文件与数据文件是分开的，升级只需替换 **`equipment.exe`**（可选连 `user-guide.md` 一起），以下文件/目录**一律不要覆盖**：
+
+| 保留（不要动）| 说明 |
+|---|---|
+| `equipment.db` | 全部设备与流转数据 |
+| `backup/` | 历史备份（含升级前快照）|
+| `config.yaml` | 端口等本机设置 |
+| `logs/` | 运行日志 |
+
+### 方法 A：手动替换（最简单）
+
+1. 先关闭目标电脑上的 `equipment.exe`（控制台窗口关闭 = 退出程序）。
+2. 建议先备份：把 `equipment.db` 复制一份到别处（或程序内「数据备份」页点手动备份）。
+3. 把新版 `equipment.exe`（可连 `user-guide.md`）复制到目标电脑的程序目录，**覆盖同名文件**；提示"是否替换"选**是**。
+4. 启动 `equipment.exe`，确认左上角版本号为 **v1.2.0**，且设备台账数量与升级前一致。
+
+### 方法 B：用更新脚本（自动备份 + 只替换程序）
+
+在目标电脑上，把 `update-app.ps1` 与新版 `equipment.exe` 放在同一个文件夹（如桌面的 `update` 文件夹），然后：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File update-app.ps1 -TargetDir "D:\equipment"
+```
+
+（把 `D:\equipment` 换成目标电脑上实际运行程序的目录）
+
+脚本会：校验目录是否正确 → 拒绝在程序运行时更新 → 自动把当前 `equipment.db` 备份到 `backup\pre-update-<时间>.db` → 只替换 `equipment.exe` 与 `user-guide.md` → 打印核对结果。数据文件不受影响。
+
+> 升级后如发现异常，可把 `backup\pre-update-*.db` 复制回 `equipment.db`（先关闭程序）回到升级前状态；或用「数据备份」页恢复。
