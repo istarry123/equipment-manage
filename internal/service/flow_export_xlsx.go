@@ -52,13 +52,17 @@ func newFlowSty(x *excelize.File) (flowSty, error) {
 	return st, nil
 }
 
-// BuildFlowExportXLSX 生成「设备流转情况.xlsx」字节内容。
+// BuildFlowExportXLSX 生成「设备流转情况.xlsx」字节内容（查询 + 渲染一步完成）。
 func BuildFlowExportXLSX(db *gorm.DB, f FlowExportFilter) ([]byte, error) {
 	data, err := BuildFlowExportData(db, f)
 	if err != nil {
 		return nil, err
 	}
+	return RenderFlowExportXLSX(data)
+}
 
+// RenderFlowExportXLSX 由已查询好的数据渲染 XLSX（供 API 层先取数量做审计、再渲染，避免重复查询）。
+func RenderFlowExportXLSX(data *FlowExportData) ([]byte, error) {
 	x := excelize.NewFile()
 	st, err := newFlowSty(x)
 	if err != nil {

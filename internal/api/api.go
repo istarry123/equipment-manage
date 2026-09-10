@@ -71,6 +71,7 @@ func New(db *gorm.DB, version string) *gin.Engine {
 
 		api.GET("/dashboard", s.Dashboard)
 		api.GET("/export/equipment", s.ExportEquipment)
+		api.GET("/export/flow", s.ExportFlow)
 		api.GET("/backups", s.ListBackups)
 		api.POST("/backup", s.ManualBackup)
 		api.POST("/restore", s.Restore)
