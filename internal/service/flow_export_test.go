@@ -340,3 +340,142 @@ func TestFlowExportHistoryLocation(t *testing.T) {
 		t.Fatalf("BORROW 位置异常: %+v", borrow)
 	}
 }
+
+// TestFlowExportFilterTeam 测试8：班组筛选只返回该班组设备。
+func TestFlowExportFilterTeam(t *testing.T) {
+	db := openDB(t)
+	tmA, _ := CreateTeam(db, "A班", "")
+	tmB, _ := CreateTeam(db, "B班", "")
+	eq1, _ := CreateEquipment(db, CreateEquipmentInput{Name: "a", Operator: "a"})
+	eq2, _ := CreateEquipment(db, CreateEquipmentInput{Name: "b", Operator: "a"})
+	if _, err := Transition(db, eq1.ID, FlowRequest{Action: models.ActionOutToTeam, Operator: "a", ToTeamID: &tmA.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Transition(db, eq2.ID, FlowRequest{Action: models.ActionOutToTeam, Operator: "a", ToTeamID: &tmB.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := BuildFlowExportData(db, FlowExportFilter{TeamID: &tmA.ID, IncludeCurrent: true, IncludeHistory: true, IncludeSummary: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Current) != 1 || data.Current[0].TeamName != "A班" {
+		t.Fatalf("班组筛选应仅 A班 1 台: %+v", data.Current)
+	}
+	// 历史也只应含 A班设备（eq1）的历史
+	for _, h := range data.History {
+		if h.EquipmentID != eq1.ID {
+			t.Fatalf("历史混入非筛选班组设备: %+v", h)
+		}
+	}
+	// 汇总班组统计应仅 A班 1
+	var aCount int64
+	for _, s := range data.Summary.ByTeam {
+		if s.Name == "A班" {
+			aCount = s.Count
+		}
+	}
+	if aCount != 1 {
+		t.Fatalf("筛选后 A班统计应 1: %+v", data.Summary.ByTeam)
+	}
+}
+
+// TestFlowExportTwoThousand 测试13：2000 台设备批量导出行数对账。
+func TestFlowExportTwoThousand(t *testing.T) {
+	db := openDB(t)
+	const n = 2000
+	now := models.Now()
+	for i := 1; i <= n; i++ {
+		eq := models.Equipment{
+			EquipmentNo:  no("D" + itoa(i)),
+			InternalCode: "EQ-" + itoa(i),
+			Name:         "设备", Model: "M",
+			Status: models.StatusInStock, EquipmentSeq: 1, CreatedAt: now, UpdatedAt: now,
+		}
+		if err := db.Create(&eq).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	data, err := BuildFlowExportData(db, FlowExportFilter{IncludeCurrent: true, IncludeHistory: true, IncludeSummary: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Total != n || len(data.Current) != n {
+		t.Fatalf("总数/当前应 %d, got total=%d current=%d", n, data.Total, len(data.Current))
+	}
+	if len(data.Summary.ByStatus) != 6 {
+		t.Fatalf("统计应含 6 状态: %+v", data.Summary.ByStatus)
+	}
+	// 在库统计应 2000
+	var inStock int64
+	for _, s := range data.Summary.ByStatus {
+		if s.Name == "在库" {
+			inStock = s.Count
+		}
+	}
+	if inStock != n {
+		t.Fatalf("在库应 %d, got %d", n, inStock)
+	}
+}
+
+// TestFlowExportIntegration 集成测试（§六十九）：建→分配班组→借出→归还→再借出→导出。
+func TestFlowExportIntegration(t *testing.T) {
+	db := openDB(t)
+	tm, _ := CreateTeam(db, "裁剪一组", "")
+	br, _ := CreateBorrower(db, "莒县双发", "", "")
+	eq, err := CreateEquipment(db, CreateEquipmentInput{EquipmentNo: no("6041"), Name: "缝纫机", Model: "DDL-8700", Operator: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 建 → 分配班组
+	if _, err := Transition(db, eq.ID, FlowRequest{Action: models.ActionOutToTeam, Operator: "a", ToTeamID: &tm.ID}); err != nil {
+		t.Fatal(err)
+	}
+	// 借出
+	if _, err := Transition(db, eq.ID, FlowRequest{Action: models.ActionBorrow, Operator: "a", BorrowerID: &br.ID}); err != nil {
+		t.Fatal(err)
+	}
+	// 归还
+	if _, err := Transition(db, eq.ID, FlowRequest{Action: models.ActionReturnBorrow, Operator: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	// 再借出
+	if _, err := Transition(db, eq.ID, FlowRequest{Action: models.ActionBorrow, Operator: "a", BorrowerID: &br.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := BuildFlowExportData(db, FlowExportFilter{IncludeCurrent: true, IncludeHistory: true, IncludeSummary: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sheet1：当前状态 = 外借
+	if len(data.Current) != 1 || data.Current[0].StatusText != "外借" {
+		t.Fatalf("当前应外借: %+v", data.Current)
+	}
+	// Sheet2：完整历史（IMPORT_INIT + 出库 + 借出 + 归还 + 借出 = 5）
+	var borrow, returnB, outTeam int
+	for _, h := range data.History {
+		switch h.Action {
+		case models.ActionBorrow:
+			borrow++
+		case models.ActionReturnBorrow:
+			returnB++
+		case models.ActionOutToTeam:
+			outTeam++
+		}
+	}
+	if borrow != 2 || returnB != 1 || outTeam != 1 {
+		t.Fatalf("历史动作计数异常 borrow=%d return=%d out=%d: %+v", borrow, returnB, outTeam, data.History)
+	}
+	// Sheet3：状态统计当前外借 1
+	var borrowed int64
+	for _, s := range data.Summary.ByStatus {
+		if s.Name == "外借" {
+			borrowed = s.Count
+		}
+	}
+	if borrowed != 1 {
+		t.Fatalf("外借统计应 1: %+v", data.Summary.ByStatus)
+	}
+}
