@@ -64,19 +64,20 @@ foreach ($d in @('backup', 'logs')) {
 }
 Copy-Item (Join-Path $Root 'config.yaml') $OutDir -Force
 Copy-Item (Join-Path $Root 'docs\user-guide.md') $OutDir -Force
-# 升级脚本随交付：客户已在使用时只能「只换 exe」升级（见用户手册 §9）。
+Copy-Item (Join-Path $Root 'docs\upgrade-guide.md') $OutDir -Force
+# 升级脚本随交付：客户已在使用时只能「只换 exe」升级（见升级说明 / 用户手册 §9）。
 # 缺了它，运维得自己去仓库里找——这是 v1.4 Phase 6 升级演练发现的交付缺口。
 Copy-Item (Join-Path $Root 'scripts\update-app.ps1') $OutDir -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir 'install') | Out-Null
 
 # 「仅升级」包：客户已在使用（有自己的数据）时，只能发这个包，
-# 只含程序 + 升级脚本 + 手册，**不含任何数据文件**，避免运维误拷 equipment.db 覆盖客户数据。
+# 只含程序 + 升级脚本 + 说明文档，**不含任何数据文件**，避免运维误拷 equipment.db 覆盖客户数据。
 # 必须每次随发布重建——否则运维会拿到过期包把客户升级回旧版本
 # （v1.4 Phase 6 演练发现 release\update-only\ 是 2026-09-10 的旧包）。
 Write-Host '== 3.5/4 组装「仅升级」包 =='
 $UpdateDir = Join-Path $Root 'release\update-only'
 New-Item -ItemType Directory -Force -Path $UpdateDir | Out-Null
-foreach ($f in @('equipment.exe', 'update-app.ps1', 'user-guide.md')) {
+foreach ($f in @('equipment.exe', 'update-app.ps1', 'user-guide.md', 'upgrade-guide.md')) {
   Copy-Item (Join-Path $OutDir $f) $UpdateDir -Force
 }
 Get-ChildItem $UpdateDir -Force | Select-Object Name, Length
