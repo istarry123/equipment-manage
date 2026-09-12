@@ -4,6 +4,10 @@ import { ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as echarts from 'echarts';
 import { listPagination } from './pagination';
+import { getAlias } from './theme';
+import { ECHARTS_THEME } from './echartsTheme';
+import { useThemeMode } from './themeMode';
+import { statusFillColor, statusText, statusTextVar } from './status';
 
 interface StatusCount { status: string; count: number }
 interface NameCount { name: string; count: number }
@@ -23,20 +27,14 @@ interface Dashboard {
   overdue_count: number; by_team_category: TeamCatRow[];
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  IN_STOCK: '#52c41a', IN_TEAM: '#1677ff', BORROWED: '#fa8c16',
-  MAINTENANCE: '#f5222d', SCRAPPED: '#8c8c8c', OTHER: '#722ed1',
-};
-const STATUS_TEXT: Record<string, string> = {
-  IN_STOCK: '在库', IN_TEAM: '班组使用', BORROWED: '外借',
-  MAINTENANCE: '维修', SCRAPPED: '报废', OTHER: '其他',
-};
-
+// 状态文案与配色统一来源见 status.ts（v1.4 决策 20）；页面内禁止再写死状态色
 function Chart({ option, height = 260 }: { option: Record<string, unknown>; height?: number }) {
+  const { mode } = useThemeMode();
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!ref.current) return;
-    const chart = echarts.init(ref.current);
+    // ECharts 画布不参与 antd CSS-in-JS，必须显式传入主题（见 echartsTheme.ts）
+    const chart = echarts.init(ref.current, ECHARTS_THEME[mode]);
     chart.setOption(option as never);
     const onResize = () => chart.resize();
     window.addEventListener('resize', onResize);
@@ -44,7 +42,7 @@ function Chart({ option, height = 260 }: { option: Record<string, unknown>; heig
       window.removeEventListener('resize', onResize);
       chart.dispose();
     };
-  }, [option]);
+  }, [option, mode]);
   return <div ref={ref} style={{ height, width: '100%' }} />;
 }
 
@@ -52,6 +50,7 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
   const [d, setD] = useState<Dashboard | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const { mode } = useThemeMode();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,9 +80,9 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
         type: 'pie', radius: ['42%', '68%'], avoidLabelOverlap: true,
         label: { show: false }, emphasis: { label: { show: true } },
         data: (d?.by_status ?? []).map((s) => ({
-          name: STATUS_TEXT[s.status] ?? s.status,
+          name: statusText(s.status),
           value: s.count,
-          itemStyle: { color: STATUS_COLOR[s.status] },
+          itemStyle: { color: statusFillColor(mode, s.status) },
         })),
       },
     ],
@@ -93,7 +92,7 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
     grid: { left: 8, right: 16, bottom: 8, top: 24, containLabel: true },
     xAxis: { type: 'value', minInterval: 1 },
     yAxis: { type: 'category', data: rows.map((r) => r.name) },
-    series: [{ type: 'bar', barWidth: 14, data: rows.map((r) => r.count), itemStyle: { color: '#1677ff' } }],
+    series: [{ type: 'bar', barWidth: 14, data: rows.map((r) => r.count), itemStyle: { color: getAlias(mode).brand } }],
   });
 
   const flowCols: ColumnsType<FlowLine> = [
@@ -140,7 +139,7 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
                 <Col span={3} key={s.status}>
                   <Card size="small">
                     <Statistic
-                      title={<span style={{ color: STATUS_COLOR[s.status] }}>{STATUS_TEXT[s.status]}</span>}
+                      title={<span style={{ color: statusTextVar(s.status) }}>{statusText(s.status)}</span>}
                       value={s.count}
                     />
                   </Card>
@@ -148,7 +147,7 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
               ))}
               <Col span={3}>
                 <Card size="small">
-                  <Statistic title={<span style={{ color: '#cf1322' }}>逾期外借</span>} value={d.overdue_count} />
+                  <Statistic title={<span style={{ color: 'var(--danger-text)' }}>逾期外借</span>} value={d.overdue_count} />
                 </Card>
               </Col>
             </Row>
@@ -162,7 +161,7 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
               <Card title="各班组/内部单位设备数" size="small">
                 {(d.by_team?.length ?? 0) > 0
                   ? <Chart option={barOption(d.by_team ?? [])} height={240} />
-                  : <div style={{ height: 240, lineHeight: '240px', textAlign: 'center', color: '#999' }}>暂无数据</div>}
+                  : <div style={{ height: 240, lineHeight: '240px', textAlign: 'center', color: 'var(--text-tertiary)' }}>暂无数据</div>}
               </Card>
             </Col>
             <Col span={8}>

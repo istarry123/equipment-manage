@@ -497,8 +497,8 @@ export default function ImportPage() {
               <Descriptions.Item label="当前疑似在借">{summary.suspected}</Descriptions.Item>
               <Descriptions.Item label="无编号设备">{summary.unnumbered} 台</Descriptions.Item>
               <Descriptions.Item label="重复编号">{summary.duplicates} 次（同号多台真机）</Descriptions.Item>
-              <Descriptions.Item label="需人工确认(REVIEW)"><b style={{ color: '#722ed1' }}>{summary.review_items}</b></Descriptions.Item>
-              <Descriptions.Item label="错误(BLOCK)"><b style={{ color: '#cf1322' }}>{summary.blocks}</b> 条</Descriptions.Item>
+              <Descriptions.Item label="需人工确认(REVIEW)"><b style={{ color: 'var(--status-other-text)' }}>{summary.review_items}</b></Descriptions.Item>
+              <Descriptions.Item label="错误(BLOCK)"><b style={{ color: 'var(--danger-text)' }}>{summary.blocks}</b> 条</Descriptions.Item>
               <Descriptions.Item label="分组">{summary.groups}（可导入 {summary.ok_groups}）</Descriptions.Item>
               <Descriptions.Item label="将跳过">{summary.block_devs} 台</Descriptions.Item>
             </Descriptions>
@@ -629,7 +629,7 @@ export default function ImportPage() {
             <Descriptions.Item label="成功导入"><b>{report.imported}</b> 台</Descriptions.Item>
             <Descriptions.Item label="跳过（BLOCK 分组）">{report.skipped} 台 / {report.block_groups} 组</Descriptions.Item>
             <Descriptions.Item label="无编号">{report.unnumbered} 台</Descriptions.Item>
-            <Descriptions.Item label="勾选确认当前外借"><b style={{ color: '#fa8c16' }}>{report.borrowed_now}</b> 台</Descriptions.Item>
+            <Descriptions.Item label="勾选确认当前外借"><b style={{ color: 'var(--status-borrowed-text)' }}>{report.borrowed_now}</b> 台</Descriptions.Item>
             <Descriptions.Item label="重复编号">{report.duplicates} 次</Descriptions.Item>
             <Descriptions.Item label="警告">{report.warnings} 条</Descriptions.Item>
             <Descriptions.Item label="内部码区间">{report.internal_code}</Descriptions.Item>

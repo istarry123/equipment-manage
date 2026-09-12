@@ -473,7 +473,7 @@ export default function ImportDetailPage() {
     { title: '编号台数', dataIndex: 'numbered', width: 90 },
     { title: '无编号', dataIndex: 'unnumbered', width: 80 },
     { title: '结构', width: 90, render: (_, r) => (r.ok ? <Tag color="green">可导入</Tag> : <Tag color="red">阻断</Tag>) },
-    { title: '编号原文', render: (_, r) => <span style={{ color: '#666' }}>{(r.raw_lines ?? []).join(' | ')}</span> },
+    { title: '编号原文', render: (_, r) => <span className="text-muted">{(r.raw_lines ?? []).join(' | ')}</span> },
   ];
 
   const issueCols: ColumnsType<IssueItem> = [
@@ -564,7 +564,7 @@ export default function ImportDetailPage() {
             size="small"
             extra={
               <Space>
-                {skippedCount > 0 && <span style={{ color: '#888' }}>明细内已勾选跳过 {skippedCount} 台</span>}
+                {skippedCount > 0 && <span className="text-muted">明细内已勾选跳过 {skippedCount} 台</span>}
                 <Button
                   danger
                   type="primary"
@@ -611,7 +611,7 @@ export default function ImportDetailPage() {
                 {(summary.same_no_multi_no ?? []).join('、') || '—'}
               </Descriptions.Item>
             </Descriptions>
-            <div style={{ marginTop: 8, color: '#888' }}>
+            <div className="text-muted" style={{ marginTop: 8 }}>
               解析问题：阻断 {summary.block_issues} / 提示 {summary.warnings} / 需确认 {summary.reviews}；解析会话 parse_id = {parseId}
             </div>
           </Card>
@@ -684,7 +684,7 @@ export default function ImportDetailPage() {
                 ))}
               </Space>
             </Checkbox.Group>
-            <div style={{ marginTop: 8, color: '#888' }}>
+            <div className="text-muted" style={{ marginTop: 8 }}>
               未勾选的外借方本次不补录，可用同一文件稍后再补（分批补录不会重复写入已补录的设备）。
             </div>
           </Card>
@@ -699,7 +699,7 @@ export default function ImportDetailPage() {
             }
           >
             {!reco && (
-              <div style={{ color: '#888' }}>
+              <div className="text-muted">
                 补录完成后点击「执行对账」：系统按外借单/流转记录的来源键逐台比对（未补录的台不算差异）。
               </div>
             )}

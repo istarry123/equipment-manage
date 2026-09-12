@@ -1,0 +1,75 @@
+/*
+ * v1.4 基础层样式
+ *
+ * 规则（docs/ui-design-tokens.md §10）：
+ * 本文件**只引用**语义 CSS 变量，不写字面色值；色值由 web/src/theme.ts 在运行时注入。
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 14px;
+  line-height: 22px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 设备编号等标识符：等宽 + 等宽数字，便于纵向比对与查错 */
+.num {
+  font-family: var(--font-family-code);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+
+.text-muted {
+  color: var(--text-tertiary);
+}
+
+.text-danger {
+  color: var(--danger-text);
+}
+
+/* 滚动条：对齐范例的克制风格 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}
+
+/*
+ * 表格样式：antd 5.8.6 的 Table 组件令牌接口为空（ComponentToken {}），
+ * 无法通过 ConfigProvider 定制表头，故在此用语义变量统一接管。
+ */
+.ant-table-thead > tr > th {
+  background: var(--bg-sunken) !important;
+  color: var(--text-secondary) !important;
+  border-bottom: 1px solid var(--border-l2) !important;
+}
+
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--border-l1) !important;
+}

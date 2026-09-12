@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Badge, Layout, Menu, Typography } from 'antd';
+import { Badge, Button, Layout, Menu, Tooltip, Typography } from 'antd';
 import {
   AppstoreOutlined,
+  BulbOutlined,
   DatabaseOutlined,
   DashboardOutlined,
   ExportOutlined,
@@ -21,6 +22,7 @@ import BorrowsPage from './BorrowsPage';
 import BackupPage from './BackupPage';
 import SettingsPage from './SettingsPage';
 import TeamViewPage from './TeamViewPage';
+import { useThemeMode } from './themeMode';
 
 const { Header, Sider, Content } = Layout;
 
@@ -41,6 +43,7 @@ export default function App() {
   const [active, setActive] = useState('dashboard');
   // 跨页打开设备详情：由班组设备页点击编号触发，复用设备台账页既有详情抽屉
   const [detailRequestId, setDetailRequestId] = useState<number | null>(null);
+  const { mode, toggleMode } = useThemeMode();
 
   const goMenu = (key: string) => {
     setActive(key);
@@ -81,25 +84,41 @@ export default function App() {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Header style={{ display: 'flex', alignItems: 'center', background: '#001529' }}>
-        <Typography.Title level={4} style={{ color: '#fff', margin: 0 }}>
+      <Header
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          background: 'var(--bg-layer-1)',
+          borderBottom: '1px solid var(--border-l1)',
+        }}
+      >
+        <Typography.Title level={4} style={{ color: 'var(--text-primary)', margin: 0 }}>
           设备资产与流转管理系统
         </Typography.Title>
-        <Badge
-          status="processing"
-          text={<span style={{ color: '#aaa' }}>v1.3.0</span>}
-          style={{ marginLeft: 24 }}
-        />
+        <Badge status="processing" text={<span style={{ color: 'var(--text-tertiary)' }}>v1.3.0</span>} />
+        <div style={{ marginLeft: 'auto' }}>
+          <Tooltip title={mode === 'dark' ? '切换到浅色模式' : '切换到深色模式'}>
+            <Button
+              type="text"
+              icon={<BulbOutlined />}
+              onClick={toggleMode}
+              style={{ color: 'var(--text-secondary)' }}
+              aria-label="切换深浅色模式"
+            >
+              {mode === 'dark' ? '浅色' : '深色'}
+            </Button>
+          </Tooltip>
+        </div>
       </Header>
       <Layout>
-        <Sider width={200} theme="dark">
+        <Sider width={200} style={{ background: 'var(--bg-layer-1)', borderRight: '1px solid var(--border-l1)' }}>
           <Menu
-            theme="dark"
             mode="inline"
             selectedKeys={[active]}
             items={MENU_ITEMS}
             onClick={({ key }) => goMenu(key)}
-            style={{ height: '100%', borderRight: 0 }}
+            style={{ height: '100%', borderRight: 0, background: 'transparent' }}
           />
         </Sider>
         <Content style={{ margin: 16 }}>{renderPage()}</Content>

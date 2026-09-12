@@ -179,7 +179,7 @@ export default function BorrowsPage() {
       title: '预计归还', dataIndex: 'expected_return_date', width: 110,
       render: (v: string, r) =>
         r.status === 'OUTSTANDING' && r.overdue_days > 0 ? (
-          <span style={{ color: '#cf1322' }}>{v || '-'}（逾期 {r.overdue_days} 天）</span>
+          <span style={{ color: 'var(--danger-text)' }}>{v || '-'}（逾期 {r.overdue_days} 天）</span>
         ) : (v || '-'),
     },
     { title: '实际归还', dataIndex: 'actual_return_date', width: 110, render: (v: string) => v || '-' },
