@@ -159,9 +159,62 @@
 | `TestAPINotSwallowedBySPAFallback` | `/api/...` 未知路径仍返回 JSON 404，不被 SPA 回退吞成 HTML |
 | `TestStaticAssetsServedFromEmbed` | 从 `index.html` 动态提取 `./assets/*` 引用并逐个请求，均 200 且非空（不硬编码构建哈希） |
 
-### Phase 3 — Dashboard 改版
+### Phase 3 — Dashboard 改版 ✅（2026-09-12 完成）
 - **范围**：KPI Hero（大字号数字 + 说明 + 占比）、卡片网格、逾期高亮、最近流转时间线、图表美化。**只用现有 `/api/dashboard` 字段，不改后端**。
 - **验收**：改版前后**数值逐项一致**（防止"改样式改错数"）；逾期标红正确。
+
+**实施记录：**
+
+- 新增 `web/src/dashboardModel.ts`：Dashboard 派生计算的唯一来源。刻意**不含任何 import**（纯函数、无副作用），因此可以直接在 Node 里用真实 API 响应跑数值断言，不必拉起浏览器或 antd。
+- 新增 `web/src/dashboard.css`：Dashboard 专用布局（Hero / KPI 网格 / 3 列与 2 列栅格 / 响应式断点），只引用语义变量。
+- `dashboardModel.ts` 的既有 TS 接口成为 Dashboard 响应类型的唯一定义处（消除页面内重复 interface）。
+- `DashboardPage.tsx` 改为：Hero（设备总数 40px + 摘要）+ KPI 卡片网格（6 状态 + 逾期）+ 3 列图表栅格 + 2 列表格栅格 + 班组×类别矩阵。
+- **后端零改动**：本 Phase 未触碰 `internal/` 与 `cmd/` 任何文件。
+
+**逐项数值审计（改版前 → 改版后，真实生产数据实测）：**
+
+| 旧版元素 | 数据字段 | 新版位置 | 实测值 |
+|---|---|---|---|
+| 「设备总数」Statistic | `total` | Hero 大字号数字 | **2148** |
+| 各状态 Statistic | `by_status[].count` | KPI 卡片（逐条对应，**不按固定清单过滤**） | 在库 1815 / 班组使用 0 / 外借 333 / 维修 0 / 报废 0 / 其他 0 |
+| 「逾期外借」Statistic | `overdue_count` | KPI 第 7 张卡片（>0 标红）+「当前外借」卡右上 Tag | **0**（未逾期，不标红） |
+| 「状态分布」甜甜圈 | `by_status` | 同图，标题补「共 N 台」 | 6 段 |
+| 「各班组/内部单位设备数」 | `by_team` | 同图 + 空态 | 0 行 → 显示「暂无数据」 |
+| 「各类别设备数」 | `by_category` | 同图 + **新增**空态 | 9 行 |
+| 「最近流转」表（5 列） | `recent_flows` | 列与字段完全不变 | 8 行 |
+| 「当前外借」表（4 列 + 逾期 Tag） | `current_borrows` + `overdue_count` | 列与字段完全不变 | 20 行（后端返回上限 20） |
+| 「各班组设备使用情况」矩阵 | `by_team_category` | 表结构、合计列、排序完全不变 | 0 行 → 空态文案 |
+| 分页口径 | — | `listPagination()`（10 条/页，不足一页不显示） | 不变 |
+
+**本次唯一新增的数字全部是纯派生值**（不来自后端、不改写任何业务数值）：各状态占比 %、Hero 摘要行「在库 x% · 外借 x% · 逾期 N 台」、甜甜圈标题的「共 N 台」。
+
+**核验方式（可复现）：** 启动预览实例 → 抓取真实 `/api/dashboard` 原始响应 → 用仓库内 esbuild 打包纯函数模块 → Node 运行断言：
+
+```powershell
+web\node_modules\@esbuild\win32-x64\esbuild.exe .tmp\dashboard-model-check.ts --bundle --platform=node --format=cjs --outfile=.tmp\dashboard-model-check.cjs
+node .tmp\dashboard-model-check.cjs
+```
+
+**实测断言结果（全部 PASS，真实生产数据 2148 台）：**
+
+| 断言 | 结果 |
+|---|---|
+| KPI 卡片条目数 === 后端 `by_status` 条数（不丢条目） | 6 vs 6 ✅ |
+| 每个状态设备数与后端**逐项**一致 | ✅ |
+| `by_status` 求和 === `total`（状态口径自洽） | 2148 vs 2148 ✅ |
+| 逾期卡片数值 / 高亮判定 === `overdue_count` | 0，不高亮 ✅ |
+| `percentOf` 0 除兜底（不产生 NaN / Infinity） | ✅ |
+| `percentOf` 保留 1 位小数（33.3 / 12.5） | ✅ |
+| `countOfStatus` 未知状态 → 0 | ✅ |
+
+派生值实测：在库 **84.5%**、外借 **15.5%**，各状态占比之和 100%。
+
+**两点呈现层面的取舍（已记录）：**
+
+1. **不加甜甜圈中心数字**：ECharts 圆心定位受 `legend` 布局影响，无法在本环境目视校准，宁可不在圆心放数字，改为把「共 N 台」写进卡片标题（可核验、不会错位）。
+2. `by_category` 补了空态（原版只有 `by_team` 有）—— 非空数据下无任何差异，属纯健壮性改进。
+
+**未验证项**：Hero/KPI 在 1366×768 下的折行与留白观感、深色模式下的对比观感 —— 需浏览器目视（本环境无浏览器）。
 
 ### Phase 4 — 列表页统一
 - **范围**：台账/班组设备/外借/班组管理/备份/设置/导入预览共用页头、工具条、表格密度、吸顶表头、空状态、加载骨架、分页样式；编号使用等宽字体。

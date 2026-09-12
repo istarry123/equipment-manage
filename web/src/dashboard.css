@@ -1,0 +1,113 @@
+/*
+ * Dashboard 专用布局（v1.4 Phase 3）。
+ * 规则同 global.css：只引用语义 CSS 变量，禁止写死色值。
+ */
+
+/* Hero：设备总数（大字号 + 大留白，对齐范例的标题节奏） */
+.dash-hero {
+  background: var(--bg-layer-1);
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-card);
+  padding: 24px;
+}
+
+.dash-hero__label {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.dash-hero__value {
+  margin-top: 4px;
+  color: var(--text-primary);
+  font-size: 40px;
+  line-height: 48px;
+  font-weight: 600;
+}
+
+.dash-hero__hint {
+  margin-top: 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* KPI 卡片网格 */
+.dash-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 12px;
+}
+
+.dash-kpi {
+  background: var(--bg-layer-1);
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-card);
+  padding: 16px;
+}
+
+.dash-kpi__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.dash-kpi__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.dash-kpi__value {
+  margin-top: 8px;
+  color: var(--text-primary);
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 600;
+}
+
+.dash-kpi__value--danger {
+  color: var(--danger-text);
+}
+
+.dash-kpi__percent {
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 卡片栅格：3 列（图表）/ 2 列（表格） */
+.dash-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.dash-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 1280px) {
+  .dash-grid-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1100px) {
+  .dash-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 图表空态（与卡片内边距对齐） */
+.dash-empty {
+  color: var(--text-tertiary);
+  text-align: center;
+}

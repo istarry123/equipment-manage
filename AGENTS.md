@@ -134,4 +134,10 @@
     - 与初版方案的偏差（已记入方案文档）：`PageHeader` 由**外壳驱动**（标题/说明取自 `routes.tsx`）而非逐页嵌入，页面级操作按钮留待 Phase 4/5。
     - **新增后端回归测试** `internal/api/spa_test.go`（3 用例）：10 条前端路由 + `/` + 未登记路径全部 200 且回退 `index.html`（守住**深链接刷新**）；`/api` 未知路径仍 JSON 404 不被 SPA 回退吞成 HTML；从 `index.html` 动态提取 `./assets/*` 逐个请求均 200 非空（不硬编码构建哈希）。
     - 验证：`tsc --noEmit` ✅、`vite build` ✅（3336 模块 / JS 2.28 MB / gzip 739 kB）、`go build ./...` ✅、`go test ./... -count=1` 全绿 ✅；路由表一致性脚本校验：`routes.tsx` 10 条路径 ↔ `App.tsx` `<Route>` 12 条（含 `/` 与 `*`）双向无遗漏。**1366×768 布局、10 个菜单逐项打开、浏览器前进/后退与刷新待用户实机验收**（本环境无浏览器）。
+  - **Phase 3 Dashboard 改版 ✅ 本次** —— 新增 `web/src/dashboardModel.ts`（Dashboard 派生计算的唯一来源，**刻意做成零 import 的纯函数**，因此可直接在 Node 里用真实 API 响应跑数值断言）、`web/src/dashboard.css`（Hero / KPI 网格 / 3 列与 2 列栅格 / 响应式断点，仅引用语义变量）；`DashboardPage.tsx` 改为 Hero（设备总数 40px + 摘要行）+ KPI 卡片网格（6 状态 + 逾期）+ 3 列图表 + 2 列表格 + 班组×类别矩阵；Dashboard 响应类型收敛到 model（删除页面内重复 interface）。**后端与 `cmd/` 零改动**。
+    - **数值一致性核验（真实生产数据 2148 台，全部 PASS）**：KPI 条目数 === `by_status` 条数（不丢条目）；每个状态 count 与后端**逐项**一致；`by_status` 求和 === `total`（2148 vs 2148）；逾期值与高亮判定 === `overdue_count`（0，不标红）；`percentOf` 0 除兜底（无 NaN/Infinity）与保留 1 位小数；未知状态 → 0。派生值实测：在库 **84.5%** / 外借 **15.5%**。
+    - 核验手段（可复现）：预览实例抓真实 `GET /api/dashboard` → 仓库内 esbuild 打包纯函数模块 → Node 运行断言；命令与逐项结果见方案文档 Phase 3 节。
+    - 呈现取舍：**不加甜甜圈中心数字**（圆心定位受 legend 影响、无法在本环境目视校准，改为卡片标题写「共 N 台」）；`by_category` 补空态（原版仅 `by_team` 有；非空数据下无差异）。
+    - 验证：`tsc --noEmit` ✅、`vite build` ✅（3338 模块 / JS 2.28 MB / gzip 739 kB / CSS 2.65 kB）、`go build ./...` ✅、`go test ./... -count=1` 全绿 ✅；预览实例端到端自检（深链接全部 200、`/api/dashboard` 返回 total=2148）；**全程生产库 SHA256 未变**（`B50615C1…`）。
+    - 预览程序已重建：`release/preview-v1.4/equipment-preview-v1.4.exe`（含 Phase 0–3，端口 8090，数据为生产库副本）。**Hero/KPI 在 1366×768 的折行留白与深色对比观感待用户实机验收**。
 - 最终验收待办（目标电脑）：① Win10/11 全流程走查；② Win7 SP1 实机回归（需 Chrome109/FF115）；③ Chrome109 离线包放入 install/；④ v1.1 全流程（状态推导→display_no→Preview/Review→清空重导→对账→回归→文档）验收；⑤ v1.2 导出流程走查；⑥ v1.3 Phase 1 模板校验实测（上传非模板文件应被拒绝并提示）。

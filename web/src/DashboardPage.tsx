@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Col, Row, Space, Statistic, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Space, Table, Tag, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as echarts from 'echarts';
@@ -7,27 +7,22 @@ import { listPagination } from './pagination';
 import { getAlias } from './theme';
 import { ECHARTS_THEME } from './echartsTheme';
 import { useThemeMode } from './themeMode';
-import { statusFillColor, statusText, statusTextVar } from './status';
+import { statusFillColor, statusFillVar, statusText } from './status';
+import {
+  buildStatusKpis,
+  countOfStatus,
+  overdueSummary,
+  percentOf,
+} from './dashboardModel';
+import type { BorrowLine, Dashboard, FlowLine, NameCount, TeamCatRow } from './dashboardModel';
+import './dashboard.css';
 
-interface StatusCount { status: string; count: number }
-interface NameCount { name: string; count: number }
-interface FlowLine {
-  equipment_id: number; equipment_no: string; display_no?: string; name: string;
-  action_text: string; to_team_name: string; borrower_name: string;
-  occurred_at: string; operator: string;
-}
-interface BorrowLine {
-  borrow_record_id: number; equipment_id: number; equipment_no: string; display_no?: string; name: string;
-  borrower_name: string; borrow_date: string; expected_return_date: string; overdue_days: number;
-}
-interface TeamCatRow { team: string; category: string; count: number }
-interface Dashboard {
-  total: number; by_status: StatusCount[]; by_category: NameCount[];
-  by_team: NameCount[]; recent_flows: FlowLine[]; current_borrows: BorrowLine[];
-  overdue_count: number; by_team_category: TeamCatRow[];
-}
-
-// 状态文案与配色统一来源见 status.ts（v1.4 决策 20）；页面内禁止再写死状态色
+/**
+ * Dashboard（v1.4 Phase 3）。
+ *
+ * 数据来源：现有 `GET /api/dashboard`（**后端未做任何改动**）。
+ * 本页改造仅限呈现：所有数值仍逐项取自同一响应，派生值（占比）集中在 dashboardModel.ts。
+ */
 function Chart({ option, height = 260 }: { option: Record<string, unknown>; height?: number }) {
   const { mode } = useThemeMode();
   const ref = useRef<HTMLDivElement | null>(null);
@@ -44,6 +39,32 @@ function Chart({ option, height = 260 }: { option: Record<string, unknown>; heig
     };
   }, [option, mode]);
   return <div ref={ref} style={{ height, width: '100%' }} />;
+}
+
+/** KPI 卡片：状态圆点 + 大字号数值 + 占比 */
+function KpiCard({
+  label,
+  value,
+  dotColor,
+  percent,
+  danger,
+}: {
+  label: string;
+  value: number;
+  dotColor: string;
+  percent?: number;
+  danger?: boolean;
+}) {
+  return (
+    <div className="dash-kpi">
+      <div className="dash-kpi__label">
+        <span className="dash-kpi__dot" style={{ background: dotColor }} />
+        <span>{label}</span>
+      </div>
+      <div className={danger ? 'dash-kpi__value dash-kpi__value--danger num' : 'dash-kpi__value num'}>{value}</div>
+      {typeof percent === 'number' && <div className="dash-kpi__percent">{percent}%</div>}
+    </div>
+  );
 }
 
 export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () => void } = {}) {
@@ -71,6 +92,12 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const total = d?.total ?? 0;
+  const kpis = buildStatusKpis(d);
+  const overdue = overdueSummary(d);
+  const inStockPercent = percentOf(total, countOfStatus(d, 'IN_STOCK'));
+  const borrowedPercent = percentOf(total, countOfStatus(d, 'BORROWED'));
 
   const donutOption: Record<string, unknown> = {
     tooltip: { trigger: 'item' },
@@ -125,68 +152,70 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
     return <Card loading />;
   }
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space direction="vertical" size={24} style={{ width: '100%' }}>
       {error && <Alert type="error" showIcon message={error} action={<Button onClick={() => void load()}>重试</Button>} />}
       {d && (
         <>
-          <Card
-            title="设备概览"
-            extra={<Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>}
-          >
-            <Row gutter={16}>
-              <Col span={4}><Card size="small"><Statistic title="设备总数" value={d.total} /></Card></Col>
-              {(d.by_status ?? []).map((s) => (
-                <Col span={3} key={s.status}>
-                  <Card size="small">
-                    <Statistic
-                      title={<span style={{ color: statusTextVar(s.status) }}>{statusText(s.status)}</span>}
-                      value={s.count}
-                    />
-                  </Card>
-                </Col>
-              ))}
-              <Col span={3}>
-                <Card size="small">
-                  <Statistic title={<span style={{ color: 'var(--danger-text)' }}>逾期外借</span>} value={d.overdue_count} />
-                </Card>
-              </Col>
-            </Row>
-          </Card>
+          {/* Hero：设备总数（大字号 + 大留白） */}
+          <section className="dash-hero">
+            <div className="dash-hero__label">设备总数</div>
+            <div className="dash-hero__value num">{total}</div>
+            <div className="dash-hero__hint">
+              在库 {inStockPercent}% · 外借 {borrowedPercent}% · 逾期 {overdue.count} 台
+            </div>
+          </section>
 
-          <Row gutter={16}>
-            <Col span={8}>
-              <Card title="状态分布" size="small"><Chart option={donutOption} height={240} /></Card>
-            </Col>
-            <Col span={8}>
-              <Card title="各班组/内部单位设备数" size="small">
-                {(d.by_team?.length ?? 0) > 0
-                  ? <Chart option={barOption(d.by_team ?? [])} height={240} />
-                  : <div style={{ height: 240, lineHeight: '240px', textAlign: 'center', color: 'var(--text-tertiary)' }}>暂无数据</div>}
-              </Card>
-            </Col>
-            <Col span={8}>
-              <Card title="各类别设备数" size="small"><Chart option={barOption(d.by_category ?? [])} height={240} /></Card>
-            </Col>
-          </Row>
+          {/* KPI 卡片网格：逐项对应 by_status，并追加逾期外借 */}
+          <div className="dash-kpis">
+            {kpis.map((k) => (
+              <KpiCard
+                key={k.status}
+                label={statusText(k.status)}
+                value={k.count}
+                dotColor={statusFillVar(k.status)}
+                percent={k.percent}
+              />
+            ))}
+            <KpiCard
+              label="逾期外借"
+              value={overdue.count}
+              dotColor={overdue.hasOverdue ? 'var(--danger-text)' : 'var(--text-dimmed)'}
+              danger={overdue.hasOverdue}
+            />
+          </div>
 
-          <Row gutter={16}>
-            <Col span={12}>
-              <Card title="最近流转" size="small">
-                <Table rowKey={(r) => `${r.equipment_id}-${r.occurred_at}-${r.action_text}`} size="small"
-                  columns={flowCols} dataSource={d.recent_flows ?? []} pagination={listPagination()} />
-              </Card>
-            </Col>
-            <Col span={12}>
-              <Card
-                title="当前外借"
-                size="small"
-                extra={<Tag color={d.overdue_count > 0 ? 'red' : 'green'}>{d.overdue_count > 0 ? `${d.overdue_count} 台逾期` : '无逾期'}</Tag>}
-              >
-                <Table rowKey="borrow_record_id" size="small" columns={borrowCols}
-                  dataSource={d.current_borrows ?? []} pagination={listPagination()} />
-              </Card>
-            </Col>
-          </Row>
+          <div className="dash-grid-3">
+            <Card title={`状态分布（共 ${total} 台）`}>
+              <Chart option={donutOption} height={240} />
+            </Card>
+            <Card title="各班组/内部单位设备数">
+              {(d.by_team?.length ?? 0) > 0
+                ? <Chart option={barOption(d.by_team ?? [])} height={240} />
+                : <div className="dash-empty" style={{ height: 240, lineHeight: '240px' }}>暂无数据</div>}
+            </Card>
+            <Card title="各类别设备数">
+              {(d.by_category?.length ?? 0) > 0
+                ? <Chart option={barOption(d.by_category ?? [])} height={240} />
+                : <div className="dash-empty" style={{ height: 240, lineHeight: '240px' }}>暂无数据</div>}
+            </Card>
+          </div>
+
+          <div className="dash-grid-2">
+            <Card
+              title="最近流转"
+              extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>}
+            >
+              <Table rowKey={(r) => `${r.equipment_id}-${r.occurred_at}-${r.action_text}`} size="small"
+                columns={flowCols} dataSource={d.recent_flows ?? []} pagination={listPagination()} />
+            </Card>
+            <Card
+              title="当前外借"
+              extra={<Tag color={overdue.hasOverdue ? 'red' : 'green'}>{overdue.hasOverdue ? `${overdue.count} 台逾期` : '无逾期'}</Tag>}
+            >
+              <Table rowKey="borrow_record_id" size="small" columns={borrowCols}
+                dataSource={d.current_borrows ?? []} pagination={listPagination()} />
+            </Card>
+          </div>
 
           <TeamCategoryMatrix rows={d.by_team_category ?? []} onOpenTeamView={onOpenTeamView} />
         </>
@@ -204,7 +233,7 @@ function TeamCategoryMatrix({
 }) {
   if (rows.length === 0) {
     return (
-      <Card title="各班组设备使用情况" size="small" extra={
+      <Card title="各班组设备使用情况" extra={
         onOpenTeamView && <Button type="link" onClick={onOpenTeamView}>查看全部班组设备 →</Button>
       }>
         <Typography.Text type="secondary">暂无班组设备（可先在班组管理/设备流转中分配）</Typography.Text>
@@ -238,7 +267,6 @@ function TeamCategoryMatrix({
   return (
     <Card
       title="各班组设备使用情况"
-      size="small"
       extra={onOpenTeamView && <Button type="link" onClick={onOpenTeamView}>查看全部班组设备 →</Button>}
     >
       <Table
