@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Card, message, Modal, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Input, message, Modal, Space, Table, Tag, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { listPagination } from './pagination';
@@ -129,11 +129,11 @@ export default function BackupPage() {
             message="恢复将以该备份覆盖当前数据库全部数据。"
             description="执行前系统会自动保留一份当前库快照；本操作不可撤销（除从快照再恢复）。" />
           <Typography.Text>请输入 <Tag>RESTORE</Tag> 以确认：</Typography.Text>
-          <input
+          <Input
             value={confirmText}
             onChange={(e) => setConfirmText(e.target.value)}
             placeholder="RESTORE"
-            style={{ width: '100%', padding: 6 }}
+            allowClear
           />
         </Space>
       </Modal>

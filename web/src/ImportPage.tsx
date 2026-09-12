@@ -5,6 +5,7 @@ import {
   Card,
   Checkbox,
   Descriptions,
+  Input,
   Modal,
   Space,
   Table,
@@ -195,6 +196,9 @@ export default function ImportPage() {
   const [parsing, setParsing] = useState(false);
   const [running, setRunning] = useState(false);
   const [resetting, setResetting] = useState(false);
+  // v1.4 Phase 5 追加：清空重导与「恢复备份」同级 —— 需手动输入确认词
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
   const [report, setReport] = useState<Report | null>(null);
   const [reconcile, setReconcile] = useState<ReconcileReport | null>(null);
   const [reconciling, setReconciling] = useState(false);
@@ -236,21 +240,17 @@ export default function ImportPage() {
     }
   }, [resetReviewState]);
 
-  const confirmReset = useCallback(() => {
-    Modal.confirm({
-      title: '清空重导（危险操作）',
-      width: 520,
-      content: (
-        <DangerNotice
-          message="将清空全部业务数据：设备 / 流转历史 / 外借单 / 导入批次。"
-          description="执行前会自动备份当前数据库（可从备份恢复）；类别、班组、外借方字典与操作审计保留。清空后需重新上传 Excel 全量导入。"
-        />
-      ),
-      okText: '我已备份确认，清空',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: () => doReset(),
-    });
+  // 清空重导（决策 18⑤ + v1.4 Phase 5 追加）：
+  // 与「恢复备份」同级为最高风险档 —— 必须手动输入确认词 RESET 才可执行。
+  // 说明：本次只提高**前端确认强度**，后端门槛未改（仍要求 confirm:true）。
+  const openReset = useCallback(() => {
+    setResetConfirmText('');
+    setResetOpen(true);
+  }, []);
+
+  const submitReset = useCallback(() => {
+    setResetOpen(false);
+    void doReset();
   }, [doReset]);
 
   const doParse = useCallback(async (file: File) => {
@@ -471,12 +471,36 @@ export default function ImportPage() {
             </Button>
           </Upload>
           <Space>
-            <Button danger loading={resetting} disabled={running || parsing} onClick={confirmReset}>
+            <Button danger loading={resetting} disabled={running || parsing} onClick={openReset}>
               清空重导（危险：先备份 → 清空业务数据）
             </Button>
           </Space>
           {resetMsg && <Alert type="success" showIcon message={resetMsg} />}
           {error && <Alert type="error" showIcon message={error} />}
+
+          <Modal
+            title="清空重导（危险操作）"
+            open={resetOpen}
+            onCancel={() => setResetOpen(false)}
+            onOk={submitReset}
+            confirmLoading={resetting}
+            okText="确认清空"
+            cancelText="取消"
+            okButtonProps={{ danger: true, disabled: resetConfirmText !== 'RESET' }}
+          >
+            <DangerNotice
+              message="将清空全部业务数据：设备 / 流转历史 / 外借单 / 导入批次。"
+              description="执行前会自动备份当前数据库（可从备份恢复）；类别、班组、外借方字典与操作审计保留。清空后需重新上传 Excel 全量导入。此操作不可撤销。"
+            />
+            <Typography.Text>请输入 <Tag>RESET</Tag> 以确认：</Typography.Text>
+            <Input
+              value={resetConfirmText}
+              onChange={(e) => setResetConfirmText(e.target.value)}
+              placeholder="RESET"
+              allowClear
+              style={{ marginTop: 8 }}
+            />
+          </Modal>
         </Space>
       </Card>
 

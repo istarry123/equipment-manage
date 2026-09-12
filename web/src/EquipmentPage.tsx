@@ -23,7 +23,7 @@ import dayjs from 'dayjs';
 import FlowExportModal from './FlowExportModal';
 import { downloadFile } from './download';
 import { PAGE_SIZE_LEDGER } from './pagination';
-import { STATUS_FILTER_OPTIONS, statusTagColor, statusText } from './status';
+import { STATUS_FILTER_OPTIONS, statusFillVar, statusTagColor, statusText } from './status';
 import DangerNotice from './DangerNotice';
 
 // ---------- 类型 ----------
@@ -499,8 +499,10 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
                 <Typography.Text type="secondary">暂无历史</Typography.Text>
               ) : (
                 <Timeline
-                  items={txns.slice(0, 40).map((t) => ({
-                    color: t.action === 'SCRAP' ? 'red' : 'blue',
+                  items={txns.map((t) => ({
+                    // 圆点取「目标状态」的语义色：一眼看出这次流转把设备带到了哪个状态；
+                    // 报废单独用危险色强调（它是终态）。
+                    color: t.action === 'SCRAP' ? 'var(--danger-text)' : statusFillVar(t.to_status),
                     children: (
                       <>
                         <div>
