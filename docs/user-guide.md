@@ -193,7 +193,7 @@ Get-Process equipment | Stop-Process -Force   # 关掉旧的程序实例
 1. 先关闭目标电脑上的 `equipment.exe`（控制台窗口关闭 = 退出程序）。
 2. 建议先备份：把 `equipment.db` 复制一份到别处（或程序内「数据备份」页点手动备份）。
 3. 把新版 `equipment.exe`（可连 `user-guide.md`）复制到目标电脑的程序目录，**覆盖同名文件**；提示"是否替换"选**是**。
-4. 启动 `equipment.exe`，确认左上角版本号为 **v1.2.0**，且设备台账数量与升级前一致。
+4. 启动 `equipment.exe`，确认左上角版本号已更新为本次发布的版本（当前为 **v1.4.0**），且设备台账数量与升级前一致。
 
 ### 方法 B：用更新脚本（自动备份 + 只替换程序）
 
@@ -205,6 +205,10 @@ powershell -ExecutionPolicy Bypass -File update-app.ps1 -TargetDir "D:\equipment
 
 （把 `D:\equipment` 换成目标电脑上实际运行程序的目录）
 
-脚本会：校验目录是否正确 → 拒绝在程序运行时更新 → 自动把当前 `equipment.db` 备份到 `backup\pre-update-<时间>.db` → 只替换 `equipment.exe` 与 `user-guide.md` → 打印核对结果。数据文件不受影响。
+脚本会：校验目录是否正确 → 拒绝在程序运行时更新 → 自动把当前 `equipment.db` 备份到 `backup\pre-update-<时间>.db` → **把旧程序备份到 `backup\equipment-before-update-<时间>.exe`** → 只替换 `equipment.exe` 与 `user-guide.md` → 打印核对结果。数据文件不受影响。
 
-> 升级后如发现异常，可把 `backup\pre-update-*.db` 复制回 `equipment.db`（先关闭程序）回到升级前状态；或用「数据备份」页恢复。
+> **升级后如发现异常，回退方法**（先关闭程序）：
+> 1. 程序回退：把 `backup\equipment-before-update-<时间>.exe` 改名为 `equipment.exe`，覆盖回程序目录；
+> 2. 数据回退：如数据也需要回到升级前，把 `backup\pre-update-<时间>.db` 复制成 `equipment.db`，或用程序内「数据备份」页恢复。
+>
+> 说明：正常升级**不会**改动数据，所以多数情况只需第 1 步。脚本之所以连旧程序一起备份，就是为了让第 1 步始终可行。

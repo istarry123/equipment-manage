@@ -64,6 +64,9 @@ foreach ($d in @('backup', 'logs')) {
 }
 Copy-Item (Join-Path $Root 'config.yaml') $OutDir -Force
 Copy-Item (Join-Path $Root 'docs\user-guide.md') $OutDir -Force
+# 升级脚本随交付：客户已在使用时只能「只换 exe」升级（见用户手册 §9）。
+# 缺了它，运维得自己去仓库里找——这是 v1.4 Phase 6 升级演练发现的交付缺口。
+Copy-Item (Join-Path $Root 'scripts\update-app.ps1') $OutDir -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir 'install') | Out-Null
 
 Write-Host '== 4/4 完成 =='

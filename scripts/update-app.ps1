@@ -43,16 +43,26 @@ if ($running) {
     Fail ("检测到程序正在运行（PID: " + (($running | ForEach-Object { $_.Id }) -join ', ') + "）。`n请先关闭程序窗口（或任务管理器结束 equipment.exe）后重试。")
 }
 
-# 4) 备份数据库（安全快照）
+# 4) 备份数据库与旧程序（安全快照 / 回退用）
+$backupDir = Join-Path $TargetDir 'backup'
+if (-not (Test-Path $backupDir)) { New-Item -ItemType Directory -Force -Path $backupDir | Out-Null }
+$stamp = Get-Date -Format 'yyyy-MM-dd_HHmmss'
+
 if (-not $SkipBackup) {
-    $backupDir = Join-Path $TargetDir 'backup'
-    if (-not (Test-Path $backupDir)) { New-Item -ItemType Directory -Force -Path $backupDir | Out-Null }
-    $stamp = Get-Date -Format 'yyyy-MM-dd_HHmmss'
     $snapshot = Join-Path $backupDir ("pre-update-" + $stamp + ".db")
     Copy-Item (Join-Path $TargetDir 'equipment.db') $snapshot -Force
     Write-Host ("[1/3] 已备份数据库：" + $snapshot)
 } else {
     Write-Host '[1/3] 已跳过数据库备份（-SkipBackup）'
+}
+
+# 旧程序始终备份：即使 -SkipBackup 也保留（回退只需把它改回 equipment.exe）。
+# 只备份数据库是不够的——若新版异常，没有旧程序就无法真正回退。
+$oldExe = Join-Path $TargetDir 'equipment.exe'
+if (Test-Path $oldExe) {
+    $exeSnapshot = Join-Path $backupDir ("equipment-before-update-" + $stamp + ".exe")
+    Copy-Item $oldExe $exeSnapshot -Force
+    Write-Host ("       已备份旧程序：" + $exeSnapshot + "（回退用）")
 }
 
 # 5) 替换程序（仅 exe；手册可选）
@@ -79,3 +89,5 @@ foreach ($f in @('equipment.exe', 'equipment.db', 'config.yaml')) {
 Write-Host ''
 Write-Host '更新完成。请启动 equipment.exe，确认左上角版本号已更新且台账数据完整。' -ForegroundColor Green
 Write-Host '提示：数据文件（equipment.db / backup / config.yaml / logs）均未被改动。'
+Write-Host ('回退方法：把 backup\equipment-before-update-*.exe 改名为 equipment.exe 覆盖回来；' )
+Write-Host ('          如需连数据一起回退，再用 backup\pre-update-*.db 走「数据备份」页的恢复。')
