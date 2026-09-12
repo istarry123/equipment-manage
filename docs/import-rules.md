@@ -163,6 +163,17 @@ Excel 无归还列 → 不能从文件判定"当前哪些设备仍在外"。**�
 - 前端 ImportPage 导入成功后新增「数据对账」卡片：执行对账 → PASS/FAIL + 双侧计数 + 差异清单表。
 - 真实文件对账 e2e：2147（Excel）== 2147（DB），PASS 无差异；删除一台后 FAIL 并列出缺失（service 测试）。
 
+### v1.3 外借明细对账与收尾（Phase 5，2026-09-11；决策 19）
+
+- **对账**：`importer.ReconcileBorrowDetail(db, parse, match)` + `POST /api/import/borrow-detail/reconcile {parse_id}`（只读）。以**外借单/流转记录备注中的来源键**（`源 R{from}-R{to}#N{i}`）为准逐台核对，因此不受写入时人工改选影响：
+  - `MATCHED` 已补录且一致（外借日期与文件一致、外借单 OUTSTANDING、存在对应流转记录）；
+  - `NOT_WRITTEN` 尚未补录（分批补录中未选的公司）——**不算差异**；
+  - `MISMATCH` 已补录但不一致（日期不符 / 状态异常 / 缺流转记录 / 同源键多张单）。
+  - `PASS` = 无 MISMATCH；前端「外借明细导入」页提供「执行对账」按钮与差异清单。
+- **分批补录的批次键**：`sha256(文件指纹 + 本次范围来源键)` → 写入 `import_batch.source_hash`。因此「同文件同范围」重复提交被拒（幂等 409），「同文件不同范围」可分多次补录；每台写入前还会检查该设备是否已由本文件补录过（备注含来源键）→ 已补录的台记为 `ALREADY_WRITTEN`，绝不重复建单。
+- **范围选择**：`POST /run` 新增 `companies:["<外借方名>", …]`（空=全部）；前端提供按外借方勾选 + **全选**，确认弹窗逐项列出「补录范围 / 本次不补录 / 置外借台数 / 新建外借方 / 跳过的台 / 参数口径」。
+- **版本收尾**：版本号升至 **v1.3.0**（后端 `cmd/equipment/main.go` + 前端页脚）；`docs/user-guide.md` 增补「外借明细导入（v1.3）」章节并更新版本号；`README.md` 版本表新增 v1.3.0。
+
 ### v1.3 外借明细补录写入（Phase 4，2026-09-11；决策 19，单事务）
 
 - **通道接口**：`POST /api/import/borrow-detail/run`（危险操作，需 `confirm:true`）

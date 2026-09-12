@@ -1,8 +1,11 @@
 package importer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,6 +14,12 @@ import (
 
 	"gorm.io/gorm"
 )
+
+// sha256Hex 字符串 SHA-256（分批补录的批次键：文件指纹 + 范围）。
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
 
 // 外借明细写入 —— v1.3 Phase 4（决策 19）。单事务：新建缺失设备 → 外借方建档 →
 // 置 BORROWED + 建外借单 + 写流转记录（历史日期）→ 序号重算 → audit。
@@ -25,9 +34,10 @@ import (
 
 // BorrowDetailOptions 写入选项。
 type BorrowDetailOptions struct {
-	Choices  map[string]uint // source_key → equipment_id（覆盖自动分配；必须在候选内）
-	Skip     map[string]bool // source_key → 跳过该台
-	Operator string          // 操作人（默认“系统导入”）
+	Choices   map[string]uint // source_key → equipment_id（覆盖自动分配；必须在候选内）
+	Skip      map[string]bool // source_key → 跳过该台
+	Companies []string        // 本次补录的外借方（非空时只写这些公司，其余跳过）
+	Operator  string          // 操作人（默认“系统导入”）
 }
 
 // BorrowDetailItemResult 逐台写入结果。
@@ -48,23 +58,29 @@ type BorrowDetailItemResult struct {
 // BorrowDetailReport 外借明细补录报告。
 type BorrowDetailReport struct {
 	Filename         string                    `json:"filename"`
-	SourceHash       string                    `json:"source_hash"`
+	SourceHash       string                    `json:"source_hash"` // 文件指纹
+	ScopeHash        string                    `json:"scope_hash"`  // 文件指纹 + 本次范围（分批补录的批次键）
 	BatchID          uint                      `json:"batch_id,omitempty"`
 	Total            int                       `json:"total"`
-	Created          int                       `json:"created"`      // 新建设备台数
-	Borrowed         int                       `json:"borrowed"`     // 置 BORROWED 并建外借单台数
-	HistoryOnly      int                       `json:"history_only"` // 已有未归还外借 → 只补流转历史
-	Skipped          int                       `json:"skipped"`      // 用户跳过台数
-	Blocked          int                       `json:"blocked"`      // 因所在块 BLOCK 未写入台数
-	Labeled          int                       `json:"labeled"`      // 打「外借N」标签台数
+	Created          int                       `json:"created"`         // 新建设备台数
+	Borrowed         int                       `json:"borrowed"`        // 置 BORROWED 并建外借单台数
+	HistoryOnly      int                       `json:"history_only"`    // 已有未归还外借 → 只补流转历史
+	AlreadyWritten   int                       `json:"already_written"` // 该台已由本文件补录过 → 不重复写入
+	Skipped          int                       `json:"skipped"`         // 用户跳过台数
+	Blocked          int                       `json:"blocked"`         // 因所在块 BLOCK 未写入台数
+	Labeled          int                       `json:"labeled"`         // 打「外借N」标签台数
 	BorrowersCreated []string                  `json:"borrowers_created"`
-	Companies        []string                  `json:"companies"`
+	Companies        []string                  `json:"companies"` // 实际写入涉及的外借方
 	Items            []*BorrowDetailItemResult `json:"items"`
 	Issues           []Issue                   `json:"issues"`
 	Time             string                    `json:"time"`
 }
 
 // ImportBorrowDetail 执行外借明细补录（单事务；不修改设备名称/型号）。
+//
+// 分批补录（用户 2026-09-11：按外借方选择导入）：批次键 = 文件指纹 + 本次范围（已选台），
+// 「同文件同范围」重复提交被拒（幂等），「同文件不同范围」可分多次补录；
+// 每台写入前还会检查该设备是否已由本文件补录过（外借单备注含来源键）→ 已补录不重复建单。
 func ImportBorrowDetail(db *gorm.DB, parse *DetailParseResult, match *DetailMatchResult, opts BorrowDetailOptions) (*BorrowDetailReport, error) {
 	if parse == nil || match == nil {
 		return nil, errors.New("缺少解析或匹配结果")
@@ -74,22 +90,6 @@ func ImportBorrowDetail(db *gorm.DB, parse *DetailParseResult, match *DetailMatc
 		operator = operatorImport
 	}
 	now := time.Now()
-	report := &BorrowDetailReport{
-		Filename: parse.Filename, SourceHash: parse.SourceHash,
-		Total: len(match.Items), Time: now.Format("2006-01-02 15:04:05"),
-	}
-
-	// 批次幂等（同文件指纹已补录过 → 拒绝，绝不重复放大）
-	if parse.SourceHash != "" {
-		var c int64
-		if err := db.Model(&models.ImportBatch{}).
-			Where("source_hash = ? AND status = ?", parse.SourceHash, batchStatusDone).Count(&c).Error; err != nil {
-			return nil, err
-		}
-		if c > 0 {
-			return nil, ErrBatchImported
-		}
-	}
 
 	// 结构 BLOCK 的块整体不写入
 	blocked := map[int]bool{}
@@ -97,6 +97,43 @@ func ImportBorrowDetail(db *gorm.DB, parse *DetailParseResult, match *DetailMatc
 		if !b.OK {
 			blocked[b.Row] = true
 		}
+	}
+	// 本次范围（将写入的来源键）→ 批次键；空范围直接拒绝
+	companySel := map[string]bool{}
+	for _, c := range opts.Companies {
+		if c = strings.TrimSpace(c); c != "" {
+			companySel[c] = true
+		}
+	}
+	inCompanyScope := func(company string) bool {
+		return len(companySel) == 0 || companySel[company]
+	}
+	var inScope []string
+	for _, it := range match.Items {
+		if blocked[it.BlockRow] || opts.Skip[it.SourceKey] || !inCompanyScope(it.Company) {
+			continue
+		}
+		inScope = append(inScope, it.SourceKey)
+	}
+	if len(inScope) == 0 {
+		return nil, errors.New("本次没有可补录的设备（全部被跳过或所在块被阻断）")
+	}
+	sort.Strings(inScope)
+	scopeHash := sha256Hex(parse.SourceHash + "|" + strings.Join(inScope, ","))
+
+	report := &BorrowDetailReport{
+		Filename: parse.Filename, SourceHash: parse.SourceHash, ScopeHash: scopeHash,
+		Total: len(match.Items), Time: now.Format("2006-01-02 15:04:05"),
+	}
+
+	// 批次幂等（同文件 + 同范围已补录过 → 拒绝，绝不重复放大）
+	var c int64
+	if err := db.Model(&models.ImportBatch{}).
+		Where("source_hash = ? AND status = ?", scopeHash, batchStatusDone).Count(&c).Error; err != nil {
+		return nil, err
+	}
+	if c > 0 {
+		return nil, ErrBatchImported
 	}
 
 	// 内部码序号（沿用台账导入口径：EQ-%06d 递增）
@@ -113,7 +150,7 @@ func ImportBorrowDetail(db *gorm.DB, parse *DetailParseResult, match *DetailMatc
 
 	err := db.Transaction(func(tx *gorm.DB) error {
 		batch := models.ImportBatch{
-			SourceName: parse.Filename, SourceHash: parse.SourceHash, Status: batchStatusDone,
+			SourceName: parse.Filename, SourceHash: scopeHash, Status: batchStatusDone,
 			TotalRows: parse.TotalCount, CreatedAt: models.FromTime(now), UpdatedAt: models.FromTime(now),
 		}
 		if err := tx.Create(&batch).Error; err != nil {
@@ -137,6 +174,12 @@ func ImportBorrowDetail(db *gorm.DB, parse *DetailParseResult, match *DetailMatc
 			if opts.Skip[it.SourceKey] {
 				res.Action = "SKIPPED"
 				res.Reason = "用户选择跳过"
+				report.Skipped++
+				continue
+			}
+			if !inCompanyScope(it.Company) {
+				res.Action = "SKIPPED"
+				res.Reason = "未选择该外借方（本次范围外）"
 				report.Skipped++
 				continue
 			}
@@ -210,6 +253,17 @@ func ImportBorrowDetail(db *gorm.DB, parse *DetailParseResult, match *DetailMatc
 			if !createNew {
 				res.EquipmentID, res.InternalCode = eq.ID, eq.InternalCode
 				res.Name, res.Model = eq.Name, eq.Model
+				// 分批补录防重：该台是否已由本文件补录过（外借单备注含来源键）
+				dup, err := detailAlreadyWritten(tx, eq.ID, it.SourceKey)
+				if err != nil {
+					return err
+				}
+				if dup {
+					res.Action = "ALREADY_WRITTEN"
+					res.Reason = "该台已由本文件补录过，未重复写入"
+					report.AlreadyWritten++
+					continue
+				}
 			}
 			if it.Label != "" {
 				report.Labeled++
@@ -311,18 +365,33 @@ func ImportBorrowDetail(db *gorm.DB, parse *DetailParseResult, match *DetailMatc
 	return report, nil
 }
 
-// detailRemark 生成外借单/流转记录备注（含 外借N 标签、来源块行与行号、到达时间原文）。
+// detailRemark 生成外借单/流转记录备注（含 外借N 标签、来源键、到达时间原文）。
 func detailRemark(it *DetailMatchItem) string {
 	var b strings.Builder
 	b.WriteString("外借明细补录")
 	if it.Label != "" {
 		fmt.Fprintf(&b, "〔%s〕", it.Label)
 	}
-	fmt.Fprintf(&b, " 来源 %s R%d", it.BlockRows, it.Row)
+	fmt.Fprintf(&b, " 源 %s", it.SourceKey)
 	if it.BorrowRaw != "" {
 		fmt.Fprintf(&b, "；到达时间原文 %s", it.BorrowRaw)
 	}
 	return b.String()
+}
+
+// detailAlreadyWritten 该设备是否已由同一来源键补录过（按未归还外借单备注中的来源键判定）。
+func detailAlreadyWritten(tx *gorm.DB, equipmentID uint, sourceKey string) (bool, error) {
+	if sourceKey == "" {
+		return false, nil
+	}
+	var c int64
+	if err := tx.Model(&models.BorrowRecord{}).
+		Where("equipment_id = ? AND status = ? AND remark LIKE ?",
+			equipmentID, models.BorrowOutstanding, "%"+sourceKey+"%").
+		Count(&c).Error; err != nil {
+		return false, err
+	}
+	return c > 0, nil
 }
 
 // mustDate 解析 YYYY-MM-DD；失败回退 fallback（正常路径不会走到）。

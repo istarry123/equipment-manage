@@ -50,6 +50,7 @@ func New(db *gorm.DB, version string) *gin.Engine {
 		dh := &importDetailHandler{server: s, store: s.details}
 		api.POST("/import/borrow-detail/parse", dh.ParseDetail)
 		api.POST("/import/borrow-detail/run", dh.RunDetail)
+		api.POST("/import/borrow-detail/reconcile", dh.ReconcileDetail)
 
 		api.GET("/equipment", s.ListEquipment)
 		api.POST("/equipment", s.CreateEquipment)

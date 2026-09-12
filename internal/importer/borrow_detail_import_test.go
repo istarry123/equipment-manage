@@ -145,6 +145,73 @@ func TestImportBorrowDetailHappyPath(t *testing.T) {
 	}
 }
 
+// TestImportBorrowDetailStagedByCompany 分批补录：先补一部分，再补其余；
+// 同文件同范围重复提交被拒，已补录的台不会重复写入（用户 2026-09-11 按外借方选择导入）。
+func TestImportBorrowDetailStagedByCompany(t *testing.T) {
+	db := openMigratedDB(t, "detail-import-staged")
+	now := models.Now()
+	for i, no := range []string{"1001", "1002"} {
+		n := no
+		eq := models.Equipment{
+			EquipmentNo: &n, EquipmentSeq: 1, InternalCode: "EQ-00030" + string(rune('0'+i)),
+			Name: "平车", Model: "DDL-9000B", Status: models.StatusInStock, CreatedAt: now, UpdatedAt: now,
+		}
+		if err := db.Create(&eq).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := writeDetailXLSX(t, detailHeaders(), map[string]string{
+		"A2": "2020.5.1", "B2": "甲公司", "C2": "1", "D2": "1001",
+		"A3": "2020.5.2", "B3": "乙公司", "C3": "1", "D3": "1002",
+	}, nil)
+	parse, err := ParseBorrowDetail(path)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	match, err := MatchBorrowDetail(db, parse)
+	if err != nil {
+		t.Fatalf("匹配失败: %v", err)
+	}
+	// 只补「甲公司」：跳过乙公司那台
+	skipYi := map[string]bool{match.Items[1].SourceKey: true}
+	rep1, err := ImportBorrowDetail(db, parse, match, BorrowDetailOptions{Skip: skipYi})
+	if err != nil {
+		t.Fatalf("第一批补录失败: %v", err)
+	}
+	if rep1.Borrowed != 1 || rep1.Skipped != 1 {
+		t.Fatalf("第一批报告异常: borrowed=%d skipped=%d", rep1.Borrowed, rep1.Skipped)
+	}
+	// 同范围重复提交 → 幂等拒绝
+	if _, err := ImportBorrowDetail(db, parse, match, BorrowDetailOptions{Skip: skipYi}); !errors.Is(err, ErrBatchImported) {
+		t.Fatalf("同范围重复补录应 ErrBatchImported，实际 %v", err)
+	}
+	// 换范围（补乙公司、跳过甲公司）→ 允许；甲公司那台虽是已补录设备，也不会重复写
+	skipJia := map[string]bool{match.Items[0].SourceKey: true}
+	rep2, err := ImportBorrowDetail(db, parse, match, BorrowDetailOptions{Skip: skipJia})
+	if err != nil {
+		t.Fatalf("第二批补录失败: %v", err)
+	}
+	if rep2.Borrowed != 1 || rep2.Skipped != 1 {
+		t.Fatalf("第二批报告异常: borrowed=%d skipped=%d", rep2.Borrowed, rep2.Skipped)
+	}
+	if rep2.ScopeHash == rep1.ScopeHash {
+		t.Fatal("不同范围的批次键应不同")
+	}
+	// 全量再补一次（甲乙都选）：两台的来源键都已写过 → 全部 ALREADY_WRITTEN，不重复建单
+	rep3, err := ImportBorrowDetail(db, parse, match, BorrowDetailOptions{})
+	if err != nil {
+		t.Fatalf("全量补录失败: %v", err)
+	}
+	if rep3.Borrowed != 0 || rep3.AlreadyWritten != 2 {
+		t.Fatalf("重复补录应全部识别为已写入: borrowed=%d already=%d", rep3.Borrowed, rep3.AlreadyWritten)
+	}
+	var recs int64
+	db.Model(&models.BorrowRecord{}).Count(&recs)
+	if recs != 2 {
+		t.Fatalf("外借单应仍为 2 张（不重复），实际 %d", recs)
+	}
+}
+
 // TestImportBorrowDetailHistoryOnlyAndSkip 已外借设备只补历史；用户跳过的台不写入。
 func TestImportBorrowDetailHistoryOnlyAndSkip(t *testing.T) {
 	db := openMigratedDB(t, "detail-import-2")

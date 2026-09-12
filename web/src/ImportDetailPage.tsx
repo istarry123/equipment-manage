@@ -150,12 +150,37 @@ interface DetailReport {
   created: number;
   borrowed: number;
   history_only: number;
+  already_written: number;
   skipped: number;
   blocked: number;
   labeled: number;
   companies: string[];
   items: ReportItem[];
   time: string;
+}
+
+interface RecoItem {
+  source_key: string;
+  label?: string;
+  equipment_no: string;
+  company: string;
+  borrow_date: string;
+  side: string;
+  detail?: string;
+  internal_code?: string;
+  status?: string;
+}
+
+interface RecoResp {
+  filename: string;
+  total: number;
+  written: number;
+  matched: number;
+  not_written: number;
+  mismatch: number;
+  items: RecoItem[];
+  pass: boolean;
+  message: string;
 }
 
 const statusText: Record<string, string> = {
@@ -178,8 +203,15 @@ const actionText: Record<string, string> = {
   BORROW_FULL: '置外借',
   CREATED_BORROW: '新建并外借',
   BORROW_HISTORY_ONLY: '仅补历史',
+  ALREADY_WRITTEN: '已补录过',
   SKIPPED: '已跳过',
   BLOCKED: '块阻断',
+};
+
+const recoSideText: Record<string, string> = {
+  MATCHED: '一致',
+  NOT_WRITTEN: '未补录',
+  MISMATCH: '不一致',
 };
 
 function matchTag(status: string) {
@@ -202,7 +234,10 @@ export default function ImportDetailPage() {
   const [done, setDone] = useState(false);
   const [choices, setChoices] = useState<Record<string, number>>({});
   const [skip, setSkip] = useState<Record<string, boolean>>({});
+  const [companySel, setCompanySel] = useState<Record<string, boolean>>({});
   const [report, setReport] = useState<DetailReport | null>(null);
+  const [reco, setReco] = useState<RecoResp | null>(null);
+  const [reconciling, setReconciling] = useState(false);
 
   const doUpload = async (file: File) => {
     setLoading(true);
@@ -214,6 +249,8 @@ export default function ImportDetailPage() {
     setReport(null);
     setChoices({});
     setSkip({});
+    setCompanySel({});
+    setReco(null);
     try {
       const form = new FormData();
       form.append('file', file);
@@ -227,6 +264,12 @@ export default function ImportDetailPage() {
       setParseId(ok.parse_id);
       setSummary(ok.summary);
       setPreview(ok.preview);
+      // 默认全选所有外借方（可按公司分批补录）
+      const all: Record<string, boolean> = {};
+      (ok.preview.borrowers ?? []).forEach((b) => {
+        all[b.name] = true;
+      });
+      setCompanySel(all);
       setDone(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -235,7 +278,23 @@ export default function ImportDetailPage() {
     }
   };
 
-  const skippedCount = Object.values(skip).filter(Boolean).length;
+  const borrowers = preview?.borrowers ?? [];
+  const selectedCompanies = borrowers.filter((b) => companySel[b.name] !== false).map((b) => b.name);
+  const unselectedCompanies = borrowers.filter((b) => companySel[b.name] === false);
+  const allSelected = borrowers.length > 0 && selectedCompanies.length === borrowers.length;
+  const someSelected = selectedCompanies.length > 0 && !allSelected;
+  const plannedCount = borrowers
+    .filter((b) => companySel[b.name] !== false)
+    .reduce((sum, b) => sum + b.devices, 0);
+  const skippedCount = (preview?.items ?? []).filter((it) => !!skip[it.source_key]).length;
+
+  const setAllCompanies = (checked: boolean) => {
+    const next: Record<string, boolean> = {};
+    borrowers.forEach((b) => {
+      next[b.name] = checked;
+    });
+    setCompanySel(next);
+  };
 
   const doRun = async () => {
     setImporting(true);
@@ -249,6 +308,7 @@ export default function ImportDetailPage() {
           confirm: true,
           choices,
           skip: Object.keys(skip).filter((k) => skip[k]),
+          companies: selectedCompanies,
         }),
       });
       const data = (await resp.json().catch(() => null)) as { report?: DetailReport; error?: { message?: string } } | null;
@@ -264,23 +324,65 @@ export default function ImportDetailPage() {
     }
   };
 
+  const doReconcile = async () => {
+    setReconciling(true);
+    setError('');
+    try {
+      const resp = await fetch('/api/import/borrow-detail/reconcile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parse_id: parseId }),
+      });
+      const data = (await resp.json().catch(() => null)) as { reconcile?: RecoResp; error?: { message?: string } } | null;
+      if (!resp.ok) {
+        throw new Error(data?.error?.message ?? `HTTP ${resp.status}`);
+      }
+      setReco(data?.reconcile ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReconciling(false);
+    }
+  };
+
   const confirmRun = () => {
     if (!summary) return;
     Modal.confirm({
       title: '确认补录外借明细？',
-      width: 560,
+      width: 620,
       okText: '确认补录',
-      okButtonProps: { danger: true },
+      okButtonProps: { danger: true, disabled: plannedCount === 0 },
       cancelText: '取消',
       content: (
         <div>
-          <p>此操作会修改设备当前状态并新增历史记录（不可删除），请确认：</p>
+          <p>此操作会修改设备当前状态并新增历史记录（不可删除），请确认以下事项：</p>
           <ul>
-            <li>将置为「外借」的设备：<b>{summary.devices - skippedCount}</b> 台（其中未匹配编号按标签新建设备 <b>{summary.missing}</b> 台）</li>
-            <li>外借方：需新建 <b>{summary.borrowers_new}</b> 个</li>
-            <li>你手动跳过的设备：<b>{skippedCount}</b> 台</li>
+            <li>
+              <b>补录范围（外借方）</b>：
+              {selectedCompanies.length === 0
+                ? '（未选择任何外借方，无法补录）'
+                : selectedCompanies.map((n) => `${n}（${borrowers.find((b) => b.name === n)?.devices ?? 0} 台）`).join('、')}
+            </li>
+            {unselectedCompanies.length > 0 && (
+              <li>
+                <b>本次不补录</b>：{unselectedCompanies.map((b) => b.name).join('、')}（可稍后用同一文件再补）
+              </li>
+            )}
+            <li>
+              将置为「外借」：<b>{plannedCount - skippedCount}</b> 台；其中未匹配编号按标签新建设备{' '}
+              <b>{preview?.missing.filter((m) => companySel[m.company] !== false && !skip[m.source_key]).length ?? 0}</b> 台
+            </li>
+            <li>
+              需新建外借方：<b>{borrowers.filter((b) => companySel[b.name] !== false && !b.exists).length}</b> 个
+            </li>
+            {skippedCount > 0 && (
+              <li>
+                你在明细里手动跳过：<b>{skippedCount}</b> 台
+              </li>
+            )}
             <li>外借日期取 Excel 的到达时间；预计归还日期留空；操作人「系统导入」</li>
-            <li>同一文件只能补录一次（幂等保护）</li>
+            <li>无型号设备按外借方顺序打「外借N」标签（只进备注，不改台账名称型号）</li>
+            <li>同一文件同一范围只能补录一次；分批补录不会重复写入已补录的设备</li>
           </ul>
         </div>
       ),
@@ -401,6 +503,21 @@ export default function ImportDetailPage() {
     },
   ];
 
+  const recoCols: ColumnsType<RecoItem> = [
+    { title: '外借标签', dataIndex: 'label', width: 90, render: (v?: string) => v || '—' },
+    { title: '来源键', dataIndex: 'source_key', width: 120 },
+    { title: '设备编号', dataIndex: 'equipment_no', width: 100 },
+    { title: '外借方', dataIndex: 'company', width: 160 },
+    { title: '文件外借日期', dataIndex: 'borrow_date', width: 120 },
+    {
+      title: '对账',
+      dataIndex: 'side',
+      width: 100,
+      render: (v: string) => <Tag color={v === 'MISMATCH' ? 'red' : v === 'NOT_WRITTEN' ? 'default' : 'green'}>{recoSideText[v] ?? v}</Tag>,
+    },
+    { title: '说明', dataIndex: 'detail' },
+  ];
+
   const reportCols: ColumnsType<ReportItem> = [
     { title: '外借标签', dataIndex: 'label', width: 90, render: (v?: string) => v || '—' },
     { title: '设备编号', dataIndex: 'equipment_no', width: 100 },
@@ -446,9 +563,15 @@ export default function ImportDetailPage() {
             size="small"
             extra={
               <Space>
-                {skippedCount > 0 && <span style={{ color: '#888' }}>已勾选跳过 {skippedCount} 台</span>}
-                <Button danger type="primary" loading={importing} onClick={confirmRun} disabled={!parseId}>
-                  确认补录（{summary.devices - skippedCount} 台）
+                {skippedCount > 0 && <span style={{ color: '#888' }}>明细内已勾选跳过 {skippedCount} 台</span>}
+                <Button
+                  danger
+                  type="primary"
+                  loading={importing}
+                  onClick={confirmRun}
+                  disabled={!parseId || plannedCount === 0}
+                >
+                  确认补录（{Math.max(plannedCount - skippedCount, 0)} 台）
                 </Button>
               </Space>
             }
@@ -521,6 +644,89 @@ export default function ImportDetailPage() {
               />
             </Card>
           )}
+
+          <Card
+            title={`补录范围（按外借方分批）：已选 ${selectedCompanies.length}/${borrowers.length} 个，共 ${plannedCount} 台`}
+            size="small"
+            extra={
+              <Space>
+                <Checkbox
+                  checked={allSelected}
+                  indeterminate={someSelected}
+                  onChange={(e) => setAllCompanies(e.target.checked)}
+                >
+                  全选
+                </Checkbox>
+                <Button size="small" onClick={() => setAllCompanies(true)}>
+                  全不选
+                </Button>
+              </Space>
+            }
+          >
+            <Checkbox.Group
+              value={selectedCompanies}
+              onChange={(vals) => {
+                const next: Record<string, boolean> = {};
+                borrowers.forEach((b) => {
+                  next[b.name] = (vals as string[]).includes(b.name);
+                });
+                setCompanySel(next);
+              }}
+            >
+              <Space direction="vertical">
+                {borrowers.map((b) => (
+                  <Checkbox key={b.name} value={b.name}>
+                    {b.name} —— {b.devices} 台 / {b.blocks} 块
+                    {b.label_from ? `；标签 ${b.label_from} ~ ${b.label_to}` : ''}
+                    {b.exists ? '' : '（外借方需新建）'}
+                  </Checkbox>
+                ))}
+              </Space>
+            </Checkbox.Group>
+            <div style={{ marginTop: 8, color: '#888' }}>
+              未勾选的外借方本次不补录，可用同一文件稍后再补（分批补录不会重复写入已补录的设备）。
+            </div>
+          </Card>
+
+          <Card
+            title="数据对账（核对已补录部分是否与文件一致）"
+            size="small"
+            extra={
+              <Button onClick={doReconcile} loading={reconciling} disabled={!parseId}>
+                执行对账
+              </Button>
+            }
+          >
+            {!reco && (
+              <div style={{ color: '#888' }}>
+                补录完成后点击「执行对账」：系统按外借单/流转记录的来源键逐台比对（未补录的台不算差异）。
+              </div>
+            )}
+            {reco && (
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Alert type={reco.pass ? 'success' : 'error'} showIcon message={reco.message} />
+                <Descriptions bordered size="small" column={5}>
+                  <Descriptions.Item label="文件台数">{reco.total}</Descriptions.Item>
+                  <Descriptions.Item label="已补录">{reco.written}</Descriptions.Item>
+                  <Descriptions.Item label="一致">
+                    <Tag color="green">{reco.matched}</Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="未补录">{reco.not_written}</Descriptions.Item>
+                  <Descriptions.Item label="不一致">
+                    <Tag color={reco.mismatch > 0 ? 'red' : 'default'}>{reco.mismatch}</Tag>
+                  </Descriptions.Item>
+                </Descriptions>
+                <Table
+                  size="small"
+                  rowKey="source_key"
+                  columns={recoCols}
+                  dataSource={reco.items}
+                  pagination={{ pageSize: 10, showSizeChanger: false }}
+                  scroll={{ x: 1200 }}
+                />
+              </Space>
+            )}
+          </Card>
 
           <Card title={`同号多台（按候选顺序自动分配）：${preview.ambiguous.length} 条`} size="small">
             <Table size="small" rowKey="source_key" columns={ambiguousCols} dataSource={preview.ambiguous} pagination={false} scroll={{ x: 1300 }} />

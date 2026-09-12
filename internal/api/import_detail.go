@@ -315,10 +315,11 @@ func candidateJSON(c *importer.MatchCandidate) gin.H {
 // 流转记录（历史日期）→ 序号重算 → audit。同文件指纹幂等（重复补录被拒）。
 func (h *importDetailHandler) RunDetail(c *gin.Context) {
 	var body struct {
-		ParseID string          `json:"parse_id"`
-		Confirm bool            `json:"confirm"`
-		Choices map[string]uint `json:"choices"`
-		Skip    []string        `json:"skip"`
+		ParseID   string          `json:"parse_id"`
+		Confirm   bool            `json:"confirm"`
+		Choices   map[string]uint `json:"choices"`
+		Skip      []string        `json:"skip"`
+		Companies []string        `json:"companies"` // 本次补录的外借方（空=全部）
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || body.ParseID == "" {
 		writeError(c, http.StatusBadRequest, "缺少 parse_id")
@@ -338,7 +339,7 @@ func (h *importDetailHandler) RunDetail(c *gin.Context) {
 		skip[k] = true
 	}
 	report, err := importer.ImportBorrowDetail(h.server.DB, sess.parse, sess.match,
-		importer.BorrowDetailOptions{Choices: body.Choices, Skip: skip})
+		importer.BorrowDetailOptions{Choices: body.Choices, Skip: skip, Companies: body.Companies})
 	if err != nil {
 		if errors.Is(err, importer.ErrBatchImported) {
 			writeError(c, http.StatusConflict, err.Error())
@@ -349,4 +350,26 @@ func (h *importDetailHandler) RunDetail(c *gin.Context) {
 	}
 	h.store.dropFile(body.ParseID)
 	c.JSON(http.StatusOK, gin.H{"report": report})
+}
+
+// ReconcileDetail POST /api/import/borrow-detail/reconcile {parse_id}：逐台核对补录结果（只读）。
+func (h *importDetailHandler) ReconcileDetail(c *gin.Context) {
+	var body struct {
+		ParseID string `json:"parse_id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.ParseID == "" {
+		writeError(c, http.StatusBadRequest, "缺少 parse_id")
+		return
+	}
+	sess, ok := h.store.get(body.ParseID)
+	if !ok {
+		writeError(c, http.StatusNotFound, "解析会话不存在或已过期，请重新上传同文件解析后再对账")
+		return
+	}
+	rep, err := importer.ReconcileBorrowDetail(h.server.DB, sess.parse, sess.match)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"reconcile": rep})
 }
