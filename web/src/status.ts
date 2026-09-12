@@ -79,6 +79,14 @@ export function statusText(status: string): string {
   return STATUS_META[status]?.text ?? status;
 }
 
+/**
+ * 状态下拉筛选选项（顺序与状态机一致）。
+ * 供各页筛选器复用，避免「在库/班组使用/外借…」这套文案在多个页面各维护一份。
+ */
+export const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = Object.keys(STATUS_META).map(
+  (key) => ({ value: key, label: STATUS_META[key].text }),
+);
+
 /** 状态 Tag 预设色；未知状态用 default */
 export function statusTagColor(status: string): string {
   return STATUS_META[status]?.tag ?? 'default';

@@ -110,7 +110,7 @@ export default function BackupPage() {
             message="程序每次启动自动备份；手动备份即时执行；默认保留最近 30 份。"
             description="恢复为危险操作：执行前系统会自动备份当前库（pre-restore-*）以可回退；恢复完成后当前页面数据即为备份时的状态，请刷新查看。"
           />
-          <Table rowKey="name" loading={loading} size="small" columns={columns} dataSource={items} pagination={listPagination()} />
+          <Table rowKey="name" sticky loading={loading} size="small" columns={columns} dataSource={items} pagination={listPagination()} />
         </Space>
       </Card>
 

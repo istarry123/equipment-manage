@@ -164,7 +164,7 @@ export default function BorrowsPage() {
 
   const columns: ColumnsType<BorrowItem> = [
     {
-      title: '显示编号', dataIndex: 'display_no', width: 150,
+      title: '显示编号', dataIndex: 'display_no', width: 150, className: 'num-cell',
       render: (v: string, r: BorrowItem) => {
         if (v) return <Typography.Text strong>{v}</Typography.Text>;
         if (r.equipment_no) return r.equipment_no;
@@ -258,7 +258,7 @@ export default function BorrowsPage() {
           <Input.Search allowClear placeholder="编号/名称/外借方" style={{ width: 240 }}
             onSearch={(v) => { setQ(v.trim()); setPage(1); }} />
         </Space>
-        <Table rowKey="id" loading={loading} size="middle" columns={columns}
+        <Table rowKey="id" sticky loading={loading} size="middle" columns={columns}
           dataSource={data?.items ?? []}
           pagination={{
             current: page, pageSize: PAGE_SIZE_LIST, total: data?.total ?? 0, showSizeChanger: false,
@@ -270,7 +270,7 @@ export default function BorrowsPage() {
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
           内部单位（含「双发」的本厂分厂）请在「班组管理」中维护（内部调拨），本表仅维护外部借出单位。
         </Typography.Paragraph>
-        <Table rowKey="id" size="small" columns={borrowerColumns} dataSource={borrowers} pagination={listPagination()} />
+        <Table rowKey="id" sticky size="small" columns={borrowerColumns} dataSource={borrowers} pagination={listPagination()} />
       </Card>
 
       {/* 归还 */}

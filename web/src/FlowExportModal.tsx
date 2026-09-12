@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button, Checkbox, Modal, Radio, Select, Space, Typography, message } from 'antd';
 import { downloadFile } from './download';
+import { STATUS_FILTER_OPTIONS } from './status';
 
 interface Team { id: number; name: string }
 interface Borrower { id: number; name: string }
@@ -11,15 +12,6 @@ export interface FlowExportModalProps {
   teams: Team[];
   borrowers: Borrower[];
 }
-
-const STATUS_OPTIONS = [
-  { value: 'IN_STOCK', label: '在库' },
-  { value: 'IN_TEAM', label: '班组使用' },
-  { value: 'BORROWED', label: '外借' },
-  { value: 'MAINTENANCE', label: '维修' },
-  { value: 'SCRAPPED', label: '报废' },
-  { value: 'OTHER', label: '其他' },
-];
 
 type RangeValue = 'all' | 'current' | 'history';
 
@@ -84,7 +76,7 @@ export default function FlowExportModal({ open, onClose, teams, borrowers }: Flo
           <div style={{ width: 140 }}>
             <Typography.Text>状态：</Typography.Text>
             <Select allowClear placeholder="全部" style={{ width: '100%' }} value={status}
-              options={STATUS_OPTIONS} onChange={(v) => setStatus(v)} />
+              options={STATUS_FILTER_OPTIONS} onChange={(v) => setStatus(v)} />
           </div>
           <div style={{ width: 180 }}>
             <Typography.Text>外借公司：</Typography.Text>

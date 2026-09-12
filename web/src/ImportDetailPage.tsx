@@ -17,6 +17,7 @@ import {
 import { UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { listPagination } from './pagination';
+import { statusText } from './status';
 
 // 外借明细导入（v1.3 Phase 3 解析/匹配预览 + Phase 4 单事务补录）。
 // 口径（决策 19 / 用户 2026-09-11）：以编号为主匹配；同号多台按候选顺序自动分配（可复核改选）；
@@ -184,15 +185,9 @@ interface RecoResp {
   message: string;
 }
 
-const statusText: Record<string, string> = {
-  IN_STOCK: '在库',
-  IN_TEAM: '班组使用',
-  BORROWED: '外借',
-  MAINTENANCE: '维修',
-  SCRAPPED: '报废',
-  OTHER: '其他',
-};
-
+// 设备状态文案统一来源见 status.ts（v1.4 Phase 4 收敛）
+// 说明：matchText / actionText / recoSideText 是「匹配分桶 / 补录动作 / 对账结果」，
+// 属另一语义域，不并入设备状态表（避免把不同业务概念混成一个字典）。
 const matchText: Record<string, string> = {
   UNIQUE: '唯一命中',
   BY_LABEL: '按标签命中',
@@ -394,13 +389,13 @@ export default function ImportDetailPage() {
   const selectOptions = (r: MatchItem) =>
     (r.candidates ?? []).map((c) => ({
       value: c.equipment_id,
-      label: `${c.label || '—'} ${c.display_no}（${c.name} / ${c.model}）${c.is_current ? ` · 当前${statusText[c.status] ?? c.status}` : ''}`,
+      label: `${c.label || '—'} ${c.display_no}（${c.name} / ${c.model}）${c.is_current ? ` · 当前${statusText(c.status)}` : ''}`,
     }));
 
   const ambiguousCols: ColumnsType<MatchItem> = [
     { title: '外借标签', dataIndex: 'label', width: 90, render: (v?: string) => v || '—' },
     { title: '源行', dataIndex: 'block_rows', width: 90 },
-    { title: '设备编号', dataIndex: 'equipment_no', width: 100 },
+    { title: '设备编号', dataIndex: 'equipment_no', width: 100, className: 'num-cell' },
     { title: '出现', width: 70, render: (_, r) => `${r.occurrence}/${r.occurrences}` },
     { title: '外借日期', dataIndex: 'borrow_date', width: 110 },
     { title: '外借方', dataIndex: 'company', width: 160 },
@@ -433,7 +428,7 @@ export default function ImportDetailPage() {
   const missingCols: ColumnsType<MatchItem> = [
     { title: '外借标签', dataIndex: 'label', width: 90, render: (v?: string) => v || '—' },
     { title: '源行', dataIndex: 'block_rows', width: 90 },
-    { title: '设备编号', dataIndex: 'equipment_no', width: 110 },
+    { title: '设备编号', dataIndex: 'equipment_no', width: 110, className: 'num-cell' },
     { title: '外借日期', dataIndex: 'borrow_date', width: 110 },
     { title: '外借方', dataIndex: 'company', width: 160 },
     { title: '处理', dataIndex: 'note' },
@@ -453,7 +448,7 @@ export default function ImportDetailPage() {
   const itemCols: ColumnsType<MatchItem> = [
     { title: '外借标签', dataIndex: 'label', width: 90, render: (v?: string) => v || '—' },
     { title: '源行', dataIndex: 'block_rows', width: 90 },
-    { title: '设备编号', dataIndex: 'equipment_no', width: 100 },
+    { title: '设备编号', dataIndex: 'equipment_no', width: 100, className: 'num-cell' },
     {
       title: '命中设备',
       width: 250,
@@ -507,7 +502,7 @@ export default function ImportDetailPage() {
   const recoCols: ColumnsType<RecoItem> = [
     { title: '外借标签', dataIndex: 'label', width: 90, render: (v?: string) => v || '—' },
     { title: '来源键', dataIndex: 'source_key', width: 120 },
-    { title: '设备编号', dataIndex: 'equipment_no', width: 100 },
+    { title: '设备编号', dataIndex: 'equipment_no', width: 100, className: 'num-cell' },
     { title: '外借方', dataIndex: 'company', width: 160 },
     { title: '文件外借日期', dataIndex: 'borrow_date', width: 120 },
     {
@@ -521,7 +516,7 @@ export default function ImportDetailPage() {
 
   const reportCols: ColumnsType<ReportItem> = [
     { title: '外借标签', dataIndex: 'label', width: 90, render: (v?: string) => v || '—' },
-    { title: '设备编号', dataIndex: 'equipment_no', width: 100 },
+    { title: '设备编号', dataIndex: 'equipment_no', width: 100, className: 'num-cell' },
     { title: '内部码', dataIndex: 'internal_code', width: 110 },
     { title: '台账名称/型号', width: 200, render: (_, r) => `${r.name} / ${r.model}` },
     { title: '外借方', dataIndex: 'company', width: 160 },

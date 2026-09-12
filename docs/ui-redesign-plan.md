@@ -216,9 +216,69 @@ node .tmp\dashboard-model-check.cjs
 
 **未验证项**：Hero/KPI 在 1366×768 下的折行与留白观感、深色模式下的对比观感 —— 需浏览器目视（本环境无浏览器）。
 
-### Phase 4 — 列表页统一
+### Phase 4 — 列表页统一 ✅（2026-09-12 完成）
 - **范围**：台账/班组设备/外借/班组管理/备份/设置/导入预览共用页头、工具条、表格密度、吸顶表头、空状态、加载骨架、分页样式；编号使用等宽字体。
 - **验收**：分页口径（20/10）、筛选、搜索、导出行为全部回归；`display_no` 显示规则不变。
+
+**实施记录（净减 25 行——收敛重复定义才是本阶段的主要收益）：**
+
+| 交付项 | 做法 |
+|---|---|
+| **状态映射收敛** | 删除 5 个文件里各自维护的状态清单（`EquipmentPage`/`TeamViewPage` 的 `STATUS_OPTIONS`+`statusMeta`、`ImportPage`/`ImportDetailPage` 的 `statusText`、`FlowExportModal` 的 `STATUS_OPTIONS`），统一到 `status.ts`；新增 `STATUS_FILTER_OPTIONS` 供各页筛选器复用 |
+| **编号等宽** | `global.css` 增 `.ant-table-tbody > tr > td.num-cell`（**只作用于表体**，避免表头字体也变等宽而与其它表头不一致）；7 个页面的编号/内部码列加 `className: 'num-cell'`；非表格处（Dashboard、班组设备编号按钮）用 `.num` |
+| **吸顶表头** | 6 个主列表页的全部 `<Table>` 加 `sticky`（**共 9 个表格**，由约定脚本逐文件核对）。表头底色已是不透明语义色，吸顶后不会透出内容 |
+| **台账空态** | 台账表加 `locale.emptyText`：有筛选条件时提示「无匹配结果，请调整或清空筛选条件」，否则「暂无设备数据」——用户在"筛错了"和"真没数据"之间不再需要猜 |
+| **浅色「外借」文字色偏差** | tokens §11 第 1 项修复：ImportPage 的「勾选确认当前外借」计数由**纯彩色文字**（浅色下 2.79:1，未达 AA）改为 `<Tag color="orange">`（antd 胶囊自带底色，两模式均可读），符合 §11 原定的处置方向 |
+
+**发现并修复的一处既有缺陷（收敛的副产物）**：`ImportPage` 的状态列原先用嵌套三元 `IN_STOCK→green / BORROWED→orange / 其余→blue`，导致**维修显示为蓝色、报废也显示为蓝色**（与状态语义不符）。收敛到 `statusTagColor()` 后自动修正为 red / default。
+
+**主动判定「无需改动」的三项（附证据，不做无用功）：**
+
+1. **工具条**：核实各页筛选行本就是 `<Space wrap style={{marginBottom:12}}>`（`EquipmentPage` L412、`BorrowsPage` L249、`TeamViewPage` L145/255）——**本来就一致**，故未新增 `.page-toolbar` 类（避免留下未使用的死 CSS）。
+2. **表格密度**：各页主表格已是 `size="middle"`（台账/外借）或 `size="small"`（字典/备份/预览），且 antd 5.8.6 的 Table 组件令牌接口为空、无法用主题统一内边距，改动收益不足。
+3. **加载态**：沿用「首次加载用 `Card loading` 骨架屏 + 有数据后刷新用 Table `loading`」——这是正确取舍（刷新时不应清空内容换成骨架），未强改为统一骨架屏。
+
+**未纳入本阶段（如实记录）**：`ImportDetailPage` 的「候选」列把 `display_no` 拼在模板字符串里，加等宽需改成 JSX；该表已有 `设备编号` 等宽列，收益低，留待需要时处理。
+
+**新增可复用守卫脚本** `scripts/check-web-conventions.ps1`（UTF-8 BOM，与仓库既有脚本一致）：
+
+| 检查组 | 断言 |
+|---|---|
+| 1 色值唯一来源 | `web/src` 除 `theme.ts` 外无硬编码 `#hex` |
+| 2 状态文案唯一来源 | 无页面重复定义状态字典（精确匹配 `IN_STOCK: '在库'`，避免误伤说明文字） |
+| 3 分页口径 | `PAGE_SIZE_LEDGER=20`、`PAGE_SIZE_LIST=10`；页面内无硬编码 `pageSize: 10/20`；台账使用 `PAGE_SIZE_LEDGER` |
+| 4 编号等宽 | 5 个主列表页使用 `num-cell` |
+| 5 吸顶表头 | 6 个主列表页 `<Table>` 数 ≤ `sticky` 数 |
+
+> 该脚本首次运行即抓到一次**真实遗漏**（`TeamViewPage` 的 `<Table>` 属性换行书写，导致 3 个表格漏改 1 个）——已修复；同时它自身也暴露过一次**误判**（初版按"同行匹配"判断，把写法正确的跨行 JSX 判为失败），已改为按文件计数比较。这个故事本身就是"把约定变成断言"的价值证明。
+
+**验证结果：**
+
+| 验证项 | 结果 |
+|---|---|
+| 约定检查脚本（6 组） | **全部 PASS**（exit 0） |
+| `tsc --noEmit` / `vite build` | ✅ 3338 模块 / CSS 2.77 kB |
+| `go build ./...` / `go test ./... -count=1` | ✅ 全绿 |
+| 接线回归审计（`git diff` 逐行） | ✅ **未改动任何** `fetch(` / `/api/` / `params.set` / `onSearch` / `setPage(` / `pageSize` |
+| 后端零改动 | ✅ `git diff --name-only v1.4.0-phase3..HEAD -- internal cmd go.mod` 为空 |
+| 实机回归（预览实例，页面同参数） | ✅ 见下表 |
+
+**实机回归（真实生产数据副本，参数与页面完全一致）：**
+
+| 请求 | 结果 |
+|---|---|
+| `/api/equipment?limit=20&offset=0` | total **2148**，返回 20 台，首条 `6040` |
+| `/api/equipment?limit=20&offset=20` | 返回 20 台，首条 `277205`（**翻页确实换页**） |
+| `/api/equipment?status=IN_STOCK` | total **1815**，全部为在库 ✅ |
+| `/api/equipment?q=6061` | total **6**（关键词搜索生效） |
+| `/api/equipment?category=1` | total 61 |
+| `/api/borrows?limit=10&offset=0` | total **333**，返回 10 条 |
+| `/api/dashboard`、`/api/teams`、`/api/categories`、`/api/backups`、`/api/teams/equipment`、`/api/borrowers` | 全部 200 |
+| `/api/export/equipment`、`/api/export/flow` | 200，106,485 / 221,038 字节（**导出仍产出真实文件**） |
+
+**交叉勾稽（两处独立口径互证）**：`status=IN_STOCK` 的 total **1815** 与 Dashboard 的「在库」数一致；`/api/borrows` 的 total **333** 与 Dashboard 的「外借」数一致。全程生产库 SHA256 未变（`B50615C1…`）。
+
+**未验证项**：吸顶表头在真实滚动中的表现、等宽编号的观感、1366×768 下的工具条折行 —— 需浏览器目视。
 
 ### Phase 5 — 关键流程与危险操作
 - **范围**：设备详情抽屉时间线、流转弹窗、导入五步流程、清空重导二次确认的统一样式与文案层级。

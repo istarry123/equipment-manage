@@ -5,6 +5,7 @@ import {
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { listPagination } from './pagination';
+import { STATUS_FILTER_OPTIONS, statusTagColor, statusText } from './status';
 
 interface Team { id: number; name: string; is_active: boolean }
 interface Category { id: number; name: string }
@@ -26,17 +27,7 @@ interface TeamView {
   total_rows: number;
 }
 
-const STATUS_OPTIONS = [
-  { value: 'IN_STOCK', text: '在库', color: 'green' },
-  { value: 'IN_TEAM', text: '班组使用', color: 'blue' },
-  { value: 'BORROWED', text: '外借', color: 'orange' },
-  { value: 'MAINTENANCE', text: '维修', color: 'red' },
-  { value: 'SCRAPPED', text: '报废', color: 'default' },
-  { value: 'OTHER', text: '其他', color: 'purple' },
-];
-const statusMeta: Record<string, { text: string; color: string }> = Object.fromEntries(
-  STATUS_OPTIONS.map((s) => [s.value, { text: s.text, color: s.color }]),
-);
+// 状态文案与配色统一来源见 status.ts（v1.4 Phase 4 收敛；页面内不得再定义状态清单）
 
 async function req<T>(url: string): Promise<T> {
   const resp = await fetch(url);
@@ -49,7 +40,7 @@ const displayNoOf = (d: TeamViewDevice): string => d.display_no ?? d.equipment_n
 
 const columns = (onOpen: (id: number) => void): ColumnsType<TeamViewDevice> => [
   {
-    title: '编号', dataIndex: 'display_no', width: 150,
+    title: '编号', dataIndex: 'display_no', width: 150, className: 'num-cell',
     render: (_: unknown, r: TeamViewDevice) =>
       r.equipment_no ? (
         <Button type="link" style={{ padding: 0, fontWeight: 600 }} onClick={() => onOpen(r.id)}>
@@ -63,10 +54,7 @@ const columns = (onOpen: (id: number) => void): ColumnsType<TeamViewDevice> => [
   { title: '型号', dataIndex: 'model', width: 150, ellipsis: true, render: (v: string) => v || '-' },
   {
     title: '状态', dataIndex: 'status', width: 100,
-    render: (v: string) => {
-      const m = statusMeta[v];
-      return m ? <Tag color={m.color}>{m.text}</Tag> : <Tag>{v}</Tag>;
-    },
+    render: (v: string) => <Tag color={statusTagColor(v)}>{statusText(v)}</Tag>,
   },
   {
     title: '到达当前班组时间', dataIndex: 'current_since', width: 170,
@@ -154,7 +142,7 @@ export default function TeamViewPage({ onOpenDevice }: { onOpenDevice: (id: numb
             label: `${cg.category}（${cg.count}台）`,
             children: (
               <Table
-                rowKey="id" size="small" columns={columns(onOpenDevice)}
+                rowKey="id" sticky size="small" columns={columns(onOpenDevice)}
                 dataSource={cg.devices} pagination={listPagination()}
               />
             ),
@@ -203,7 +191,7 @@ export default function TeamViewPage({ onOpenDevice }: { onOpenDevice: (id: numb
           />
           <Select
             allowClear placeholder="设备状态" style={{ width: 140 }}
-            options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.text }))}
+            options={STATUS_FILTER_OPTIONS}
             value={fStatus || undefined}
             onChange={(v) => setFStatus(v ?? '')}
           />
@@ -239,7 +227,7 @@ export default function TeamViewPage({ onOpenDevice }: { onOpenDevice: (id: numb
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有符合条件的设备" />
               ) : (
                 <Table
-                  rowKey="id" size="small" columns={columns(onOpenDevice)}
+                  rowKey="id" sticky size="small" columns={columns(onOpenDevice)}
                   dataSource={unassigned.devices}
                   pagination={listPagination()}
                 />
@@ -255,7 +243,7 @@ export default function TeamViewPage({ onOpenDevice }: { onOpenDevice: (id: numb
                   style={{ marginBottom: 12 }}
                 >
                   <Table
-                    rowKey="id" size="small" columns={columns(onOpenDevice)}
+                    rowKey="id" sticky size="small" columns={columns(onOpenDevice)}
                     dataSource={unassigned.devices} pagination={listPagination()}
                   />
                 </Card>

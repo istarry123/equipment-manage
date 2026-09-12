@@ -23,6 +23,7 @@ import dayjs from 'dayjs';
 import FlowExportModal from './FlowExportModal';
 import { downloadFile } from './download';
 import { PAGE_SIZE_LEDGER } from './pagination';
+import { STATUS_FILTER_OPTIONS, statusTagColor, statusText } from './status';
 
 // ---------- 类型 ----------
 interface Category { id: number; name: string }
@@ -60,17 +61,7 @@ interface TxnItem {
   occurred_at: string; operator: string; remark: string;
 }
 
-const STATUS_OPTIONS = [
-  { value: 'IN_STOCK', text: '在库', color: 'green' },
-  { value: 'IN_TEAM', text: '班组使用', color: 'blue' },
-  { value: 'BORROWED', text: '外借', color: 'orange' },
-  { value: 'MAINTENANCE', text: '维修', color: 'red' },
-  { value: 'SCRAPPED', text: '报废', color: 'default' },
-  { value: 'OTHER', text: '其他', color: 'purple' },
-];
-const statusMeta: Record<string, { text: string; color: string }> = Object.fromEntries(
-  STATUS_OPTIONS.map((s) => [s.value, { text: s.text, color: s.color }]),
-);
+// 状态文案与配色统一来源见 status.ts（v1.4 Phase 4 收敛；页面内不得再定义状态清单）
 
 // 展示编号（决策18）：统一取后端 display_no；异常缺省回退 equipment_no。
 const displayNoOf = (e: EqItem): string => e.display_no ?? e.equipment_no ?? '无编号';
@@ -355,19 +346,16 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
   const columns: ColumnsType<EqItem> = useMemo(
     () => [
       {
-        title: '显示编号', dataIndex: 'display_no', width: 150,
+        title: '显示编号', dataIndex: 'display_no', width: 150, className: 'num-cell',
         render: (_: unknown, r: EqItem) => displayNoOf(r),
       },
-      { title: '内部码', dataIndex: 'internal_code', width: 110 },
+      { title: '内部码', dataIndex: 'internal_code', width: 110, className: 'num-cell' },
       { title: '名称', dataIndex: 'name', ellipsis: true },
       { title: '型号', dataIndex: 'model', width: 140, ellipsis: true, render: (v: string) => v || '-' },
       { title: '类别', dataIndex: 'category', width: 110, render: (v: string) => v || '-' },
       {
         title: '状态', dataIndex: 'status', width: 100,
-        render: (v: string) => {
-          const m = statusMeta[v];
-          return m ? <Tag color={m.color}>{m.text}</Tag> : <Tag>{v}</Tag>;
-        },
+        render: (v: string) => <Tag color={statusTagColor(v)}>{statusText(v)}</Tag>,
       },
       {
         title: '当前位置', key: 'location', width: 150, ellipsis: true,
@@ -387,6 +375,7 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
     [openDetail],
   );
 
+  const hasFilter = Boolean(q || fCategory || fStatus || fTeam);
   const actions = detail ? ACTIONS_BY_STATUS[detail.status] ?? [] : [];
 
   return (
@@ -416,13 +405,14 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
             options={categories.map((c) => ({ value: c.id, label: c.name }))} value={fCategory}
             onChange={(v) => { setFCategory(v); setPage(1); }} />
           <Select allowClear placeholder="状态" style={{ width: 130 }}
-            options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.text }))} value={fStatus}
+            options={STATUS_FILTER_OPTIONS} value={fStatus}
             onChange={(v) => { setFStatus(v); setPage(1); }} />
           <Select allowClear placeholder="班组/内部单位" style={{ width: 170 }}
             options={teams.map((t) => ({ value: t.id, label: t.name }))} value={fTeam}
             onChange={(v) => { setFTeam(v); setPage(1); }} />
         </Space>
-        <Table rowKey="id" loading={loading} size="middle" columns={columns} dataSource={data?.items ?? []}
+        <Table rowKey="id" sticky loading={loading} size="middle" columns={columns} dataSource={data?.items ?? []}
+          locale={{ emptyText: hasFilter ? '无匹配结果，请调整或清空筛选条件' : '暂无设备数据' }}
           onRow={(r) => ({ onDoubleClick: () => void openDetail(r.id) })}
           pagination={{
             current: page, pageSize, total: data?.total ?? 0, showSizeChanger: false,
@@ -480,10 +470,7 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
               <Descriptions.Item label="型号">{detail.model || '-'}</Descriptions.Item>
               <Descriptions.Item label="类别">{detail.category || '-'}</Descriptions.Item>
               <Descriptions.Item label="状态">
-                {(() => {
-                  const m = statusMeta[detail.status];
-                  return m ? <Tag color={m.color}>{m.text}</Tag> : detail.status;
-                })()}
+                <Tag color={statusTagColor(detail.status)}>{statusText(detail.status)}</Tag>
               </Descriptions.Item>
               <Descriptions.Item label="当前位置">{locationText(detail)}</Descriptions.Item>
               <Descriptions.Item label="到达当前状态时间">{detail.current_since ?? '-'}</Descriptions.Item>

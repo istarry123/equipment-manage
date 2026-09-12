@@ -97,7 +97,7 @@ export default function SettingsPage() {
           <Typography.Paragraph type="secondary" style={{ marginBottom: 4 }}>
             新增类别后即可在设备录入/筛选中选择；删除仅限未被任何设备引用的类别（被引用时需先调整设备类别）。
           </Typography.Paragraph>
-          <Table rowKey="id" size="small" columns={columns} dataSource={categories} pagination={listPagination()} />
+          <Table rowKey="id" sticky size="small" columns={columns} dataSource={categories} pagination={listPagination()} />
           <Form form={form} layout="inline">
             <Form.Item name="name" rules={[{ required: true, message: '请输入类别名称' }]}>
               <Input placeholder="新类别名称，如：裁剪设备" style={{ width: 240 }} />

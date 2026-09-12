@@ -33,6 +33,17 @@ body {
   letter-spacing: 0.2px;
 }
 
+/*
+ * 表格「编号列」等宽（v1.4 Phase 4）：
+ * 用法：列定义加 className: 'num-cell'（antd 会把该 class 同时加到 th 与 td，
+ * 故此规则只作用于 tbody，避免表头字体也变成等宽而与其他表头不一致）。
+ */
+.ant-table-tbody > tr > td.num-cell {
+  font-family: var(--font-family-code);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+
 .text-muted {
   color: var(--text-tertiary);
 }

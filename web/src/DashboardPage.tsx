@@ -125,7 +125,7 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
   const flowCols: ColumnsType<FlowLine> = [
     {
       title: '设备', key: 'eq', render: (_: unknown, r: FlowLine) => (
-        <span>{r.display_no || r.equipment_no || '无编号'} <Typography.Text type="secondary">{r.name}</Typography.Text></span>
+        <span><span className="num">{r.display_no || r.equipment_no || '无编号'}</span> <Typography.Text type="secondary">{r.name}</Typography.Text></span>
       ),
     },
     { title: '动作', dataIndex: 'action_text', width: 110 },
@@ -136,7 +136,7 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
   const borrowCols: ColumnsType<BorrowLine> = [
     {
       title: '设备', key: 'eq', render: (_: unknown, r: BorrowLine) => (
-        <span>{r.display_no || r.equipment_no || '无编号'} <Typography.Text type="secondary">{r.name}</Typography.Text></span>
+        <span><span className="num">{r.display_no || r.equipment_no || '无编号'}</span> <Typography.Text type="secondary">{r.name}</Typography.Text></span>
       ),
     },
     { title: '外借方', dataIndex: 'borrower_name', width: 170, ellipsis: true },

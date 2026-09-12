@@ -15,6 +15,7 @@ import {
 import { UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { listPagination } from './pagination';
+import { statusTagColor, statusText } from './status';
 
 // ---------- 与后端约定 ----------
 interface Summary {
@@ -169,14 +170,7 @@ interface EqResp {
   items: EqItem[];
 }
 
-const statusText: Record<string, string> = {
-  IN_STOCK: '在库',
-  IN_TEAM: '班组使用',
-  BORROWED: '外借',
-  MAINTENANCE: '维修',
-  SCRAPPED: '报废',
-  OTHER: '其他',
-};
+// 状态文案统一来源见 status.ts（v1.4 Phase 4 收敛）
 
 async function jsonOrError<T>(resp: Response): Promise<T> {
   const data = await resp.json().catch(() => null);
@@ -384,7 +378,7 @@ export default function ImportPage() {
   ];
 
   const deviceColumns: ColumnsType<PreviewDevice> = [
-    { title: '显示编号', dataIndex: 'display_no', width: 160 },
+    { title: '显示编号', dataIndex: 'display_no', width: 160, className: 'num-cell' },
     { title: '名称', dataIndex: 'name', ellipsis: true },
     { title: '型号', dataIndex: 'model', width: 140, ellipsis: true, render: (v: string) => v || '-' },
     { title: '类别', dataIndex: 'category', width: 120 },
@@ -405,7 +399,7 @@ export default function ImportPage() {
         </Checkbox>
       ),
     },
-    { title: '显示编号', dataIndex: 'display_no', width: 160 },
+    { title: '显示编号', dataIndex: 'display_no', width: 160, className: 'num-cell' },
     { title: '名称', dataIndex: 'name', ellipsis: true },
     { title: '型号', dataIndex: 'model', width: 130, render: (v: string) => v || '-' },
     { title: '公司', dataIndex: 'company', width: 180, ellipsis: true },
@@ -430,7 +424,7 @@ export default function ImportPage() {
   const eqColumns: ColumnsType<EqItem> = [
     { title: '内部码', dataIndex: 'internal_code', width: 110 },
     {
-      title: '显示编号', dataIndex: 'display_no', width: 150,
+      title: '显示编号', dataIndex: 'display_no', width: 150, className: 'num-cell',
       render: (v: string | undefined, r: EqItem) =>
         (v || r.equipment_no) ?? <Typography.Text type="secondary">无编号</Typography.Text>,
     },
@@ -439,18 +433,18 @@ export default function ImportPage() {
     { title: '类别', dataIndex: 'category', width: 110 },
     {
       title: '状态', dataIndex: 'status', width: 100,
-      render: (v: string) => <Tag color={v === 'IN_STOCK' ? 'green' : v === 'BORROWED' ? 'orange' : 'blue'}>{statusText[v] ?? v}</Tag>,
+      render: (v: string) => <Tag color={statusTagColor(v)}>{statusText(v)}</Tag>,
     },
     { title: '到达时间', dataIndex: 'current_since', width: 170, render: (v: string | null) => v ?? '-' },
   ];
 
   const reconDiffColumns: ColumnsType<ReconDiff> = [
     { title: '方向', dataIndex: 'side', width: 90, render: (v: string) => (v === 'excel' ? <Tag color="red">Excel 缺失</Tag> : <Tag color="orange">DB 多出</Tag>) },
-    { title: '显示编号', dataIndex: 'display_no', width: 150 },
+    { title: '显示编号', dataIndex: 'display_no', width: 150, className: 'num-cell' },
     { title: '名称', dataIndex: 'name', ellipsis: true },
     { title: '型号', dataIndex: 'model', width: 130, render: (v: string) => v || '-' },
     { title: '来源', dataIndex: 'group_rows', width: 110, render: (v: string) => v || '-' },
-    { title: '内部码', dataIndex: 'internal_code', width: 110, render: (v?: string) => v || '-' },
+    { title: '内部码', dataIndex: 'internal_code', width: 110, className: 'num-cell', render: (v?: string) => v || '-' },
   ];
 
   return (
@@ -629,7 +623,7 @@ export default function ImportPage() {
             <Descriptions.Item label="成功导入"><b>{report.imported}</b> 台</Descriptions.Item>
             <Descriptions.Item label="跳过（BLOCK 分组）">{report.skipped} 台 / {report.block_groups} 组</Descriptions.Item>
             <Descriptions.Item label="无编号">{report.unnumbered} 台</Descriptions.Item>
-            <Descriptions.Item label="勾选确认当前外借"><b style={{ color: 'var(--status-borrowed-text)' }}>{report.borrowed_now}</b> 台</Descriptions.Item>
+            <Descriptions.Item label="勾选确认当前外借"><Tag color="orange">{report.borrowed_now}</Tag> 台</Descriptions.Item>
             <Descriptions.Item label="重复编号">{report.duplicates} 次</Descriptions.Item>
             <Descriptions.Item label="警告">{report.warnings} 条</Descriptions.Item>
             <Descriptions.Item label="内部码区间">{report.internal_code}</Descriptions.Item>
