@@ -19,6 +19,7 @@ type Server struct {
 	DB       *gorm.DB
 	Version  string
 	sessions *parseStore
+	details  *detailStore
 }
 
 // New 创建 gin 引擎（生产环境默认 Release 模式；DSH_DEBUG=1 时开启调试）。
@@ -28,7 +29,7 @@ func New(db *gorm.DB, version string) *gin.Engine {
 	} else {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	s := &Server{DB: db, Version: version, sessions: newParseStore()}
+	s := &Server{DB: db, Version: version, sessions: newParseStore(), details: newDetailStore()}
 
 	r := gin.New()
 	r.Use(gin.LoggerWithWriter(logger.Writer()), gin.Recovery())
@@ -44,6 +45,10 @@ func New(db *gorm.DB, version string) *gin.Engine {
 		api.POST("/import/run", ih.Run)
 		api.POST("/import/reset", ih.Reset)
 		api.POST("/import/reconcile", ih.Reconcile)
+
+		// 外借明细通道（v1.3 Phase 3：解析 + 匹配预览，只读）
+		dh := &importDetailHandler{server: s, store: s.details}
+		api.POST("/import/borrow-detail/parse", dh.ParseDetail)
 
 		api.GET("/equipment", s.ListEquipment)
 		api.POST("/equipment", s.CreateEquipment)

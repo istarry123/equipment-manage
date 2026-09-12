@@ -74,13 +74,16 @@ func cellAt(row []string, i int) string {
 }
 
 // echoRow 把一行单元格渲染为 `A="x"、B="y"` 形式（最多 6 个非空值，超长截断），用于错误回显。
+// 相邻重复值（横向合并的标题行会被 excelize 回填到整行）只回显一次，避免刷屏。
 func echoRow(row []string) string {
 	var out []string
+	last := ""
 	for i := 0; i < len(templateHeader) && len(out) < 6; i++ {
 		v := cellAt(row, i)
-		if v == "" {
+		if v == "" || v == last {
 			continue
 		}
+		last = v
 		if utf8.RuneCountInString(v) > 24 {
 			v = string([]rune(v)[:24]) + "…"
 		}

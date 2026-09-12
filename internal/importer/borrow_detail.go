@@ -183,8 +183,8 @@ func ParseBorrowDetail(path string) (*DetailParseResult, error) {
 		header[c-1] = cell(c, detailHeaderRow)
 	}
 	if err := validateDetailHeader(header); err != nil {
-		// 反向提示：误传台账版式 → 引导到台账通道（两个文件常被混用）
-		if isLedgerLayout(cell, detailHeaderRow) {
+		// 反向提示：误传台账版式 → 引导到台账通道（台账表头在 R2，R1 为公司标题）
+		if isLedgerLayout(cell, sheetHeaderRow) {
 			return nil, fmt.Errorf("%w；该文件是「设备借出总账（台账）」版式，请改用设备台账导入通道", err)
 		}
 		return nil, err

@@ -5,6 +5,7 @@ import {
   DatabaseOutlined,
   DashboardOutlined,
   ExportOutlined,
+  FileAddOutlined,
   ImportOutlined,
   ProfileOutlined,
   SettingOutlined,
@@ -14,6 +15,7 @@ import {
 import DashboardPage from './DashboardPage';
 import EquipmentPage from './EquipmentPage';
 import ImportPage from './ImportPage';
+import ImportDetailPage from './ImportDetailPage';
 import TeamsPage from './TeamsPage';
 import BorrowsPage from './BorrowsPage';
 import BackupPage from './BackupPage';
@@ -30,6 +32,7 @@ const MENU_ITEMS = [
   { key: 'borrow', icon: <ExportOutlined />, label: '外借管理' },
   { key: 'team', icon: <TeamOutlined />, label: '班组管理' },
   { key: 'import', icon: <ImportOutlined />, label: '数据导入' },
+  { key: 'importDetail', icon: <FileAddOutlined />, label: '外借明细导入' },
   { key: 'backup', icon: <DatabaseOutlined />, label: '数据备份' },
   { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
@@ -64,6 +67,8 @@ export default function App() {
         return <TeamsPage />;
       case 'import':
         return <ImportPage />;
+      case 'importDetail':
+        return <ImportDetailPage />;
       case 'backup':
         return <BackupPage />;
       case 'settings':
