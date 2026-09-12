@@ -206,3 +206,18 @@ equipment-manage/
 - **真实文件终验指标**（`设备借出总账.xlsx`）：198 组 / 台账 D=2147 = 编号 1580 + 无编号 567；DB 导入 2147 台全绿；对账 PASS；REVIEW 57 项全部可列出。
 - **版本**：Phase 13 收尾升 **v1.1.0**（后端 + 前端页脚），tag `v1.1.0`（2026-09-09）；发布目录经 `scripts/build-release.ps1` 重建。
 - **后续（目标电脑验收）**：Win10/11 全流程走查、Win7 SP1 实机回归（Chrome109/FF115）、Chrome109 离线包放入 install/；Win7 实机 0xc0000005 问题待用户回传 EQ_STEPLOG。
+
+## 16. v1.4 界面改版 完成记录（2026-09-12，tag v1.4.0）
+
+> 权威进度与要点以 `AGENTS.md` 决策 20 + §6 状态为准；方案与逐阶段实施记录见 `docs/ui-redesign-plan.md`，设计令牌规范见 `docs/ui-design-tokens.md`。
+
+- **起因与决策**：用户要求「优化界面，加 Next.js，以 DeepSeek Harness 页面为范例」。方案阶段结论：**观感来自设计令牌，不来自框架** → **不引入 Next.js**（与 Win7/Chrome 109 浏览器基线、Node 20.9 构建要求、锁定 React 18.2 + antd 5.8.6 三处硬冲突，证据见决策 20）；默认深色 + 一键切换浅色；引入 `react-router-dom@6.30.6` 实现页面路由化。
+- **六个阶段**：Phase 0 视觉基准与设计令牌（同品牌设计系统**实测**取值 + WCAG 校验，深色六状态色全部达 AA）→ Phase 1 令牌落地换肤（色值收敛为单一来源）→ Phase 2 布局骨架与导航（路由化、深链接可刷新，10 个页面组件零改动）→ Phase 3 Dashboard 改版（**数值零变化**，用真实 API 响应跑断言）→ Phase 4 列表页统一（状态/色值收敛、编号等宽、吸顶表头）→ Phase 5 危险操作受控（安全不变量测试 + 统一后果提示 + 清空重导与恢复同门槛）→ Phase 6 交付与回归。
+- **不变量守住**：数据层 / API / 状态机 / 导入对账 / 备份恢复 / 导出 / Win7 兼容 / 单 exe + go:embed 交付**全程未动**；Phase 3、Phase 4 均由 `git diff` 逐行证明后端与请求接线零改动。
+- **本版新增可复用守卫**：`scripts/check-web-conventions.ps1`（6 组前端约定断言：色值/状态文案唯一来源、分页口径、编号等宽、吸顶表头）——首跑即抓到一处真实遗漏（`TeamViewPage` 漏改 1 个表格）。
+- **交付发布（Phase 6）发现并修复两处真实交付阻塞缺陷**：
+  1. `scripts/build-release.ps1` 在 `$ErrorActionPreference='Stop'` 下被 npm 的 stderr 警告打断（PS 5.1 把原生命令 stderr 当终止错误）→ 新增 `Invoke-Native` 按退出码判定；修复中又踩到「`$Args` 是 PowerShell 自动变量」导致参数传不进去的坑。
+  2. 交付目录 `release/equipment/equipment.db` 是 **2026-09-09 的旧库**（2147 台 / 在库 2028 / 外借 119），**缺失 v1.3 全部外借明细补录** → 已换为当前生产库（2148 / 1815 / 333），旧库留存 `.tmp/release-db-stale-20260909.db` 作为证据。
+- **产物自检**（从交付目录副本启动）：`version=1.4.0`、内嵌新前端、`total=2148` / 在库 1815 / 外借 333 / 外借单 333 —— 全部符合预期。
+- **回归**：`go vet` exit 0、`go test ./... -count=1` 全绿（含 4 个新安全用例）、前端约定 6 组 PASS、`tsc`/`vite build` 通过。
+- **后续（目标电脑验收）**：Win10/11 全流程走查、Win7 SP1 实机回归（Chrome109/FF115）、Chrome109 离线包放入 `install/`。

@@ -18,8 +18,8 @@ import { useThemeMode } from './themeMode';
 const { Header, Sider, Content } = Layout;
 
 const APP_NAME = '设备资产与流转管理系统';
-// 版本号在 Phase 6 随发布统一升为 v1.4.0（Phase 2 不提前改版本）
-const APP_VERSION = 'v1.3.0';
+// v1.4.0：界面改版（设计令牌 / 路由化 / Dashboard / 列表页 / 危险操作）随本次发布统一收口
+const APP_VERSION = 'v1.4.0';
 
 function pathOf(key: string): string {
   return ROUTES.find((r) => r.key === key)?.path ?? DEFAULT_PATH;

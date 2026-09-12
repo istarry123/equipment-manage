@@ -331,8 +331,48 @@ node .tmp\dashboard-model-check.cjs
 
 **未验证项**：`DangerNotice` 在弹窗中的视觉观感、报废弹窗危险色确认按钮的实际显示 —— 需浏览器目视。
 
-### Phase 6 — 交付与回归
+### Phase 6 — 交付与回归 ✅（2026-09-12 完成）
 - **范围**：Win10/11 + Win7 SP1（Chrome 109 / FF115）实测；`scripts/build-release.ps1` 重建 `release/equipment/`；版本升 v1.4.0；更新 `docs/user-guide.md`（界面说明）；tag `v1.4.0`。
+
+**实施记录：**
+
+- **版本统一 v1.4.0**：`cmd/equipment/main.go`（`var version`）+ `web/src/App.tsx`（`APP_VERSION`）+ `README.md` 版本表新增 v1.4.0 行。
+- **`docs/user-guide.md` 更新**：标题升 v1.4.0；新增「界面外观与导航（v1.4）」小节（深色/浅色切换与记忆、页面地址可直达与 F5 刷新不丢页、侧栏折叠、编号等宽、表头吸顶、设备详情时间线）；「清空重导」两处补充**需输入 RESET 确认**；并明确写出「以上均为外观与导航改动，业务规则/状态/流转/导入/对账/导出/备份/分页口径完全未变」。
+- **发布构建**：`scripts/build-release.ps1` 执行成功，产物 `release/equipment/`（exe 28.4 MB + config.yaml + user-guide.md + backup/logs/install/uploads）。
+
+**本阶段发现并修复的两处真实交付阻塞缺陷（重点是这两条）：**
+
+1. **发布脚本被 npm 的警告打断**（PS 5.1 的经典陷阱）：
+   脚本开头是 `$ErrorActionPreference = 'Stop'`，而 **PowerShell 5.1 会把原生命令写入 stderr 的普通输出包装成终止性错误**。`npm run build` 每次都会向 stderr 写 chunk 体积警告 → 脚本在**第 1 步就抛 RemoteException 中断**（已单独复现：EAP=Stop 抛异常、EAP=Continue 则 `npm exit=0`）。
+   修复：新增 `Invoke-Native` 辅助函数统一调用原生命令 —— 临时放宽 EAP、输出照常打印、**改由 `$LASTEXITCODE` 判定成败**（真正的失败仍会 throw）。
+   修复过程中还踩到第二个坑：辅助函数的参数名原本叫 `$Args`，而 **`$Args` 是 PowerShell 的自动变量** → 参数根本传不进去（npm 打印了用法帮助）。已改名 `$ArgList` 并注明原因。
+2. **交付目录里的数据库是三天前的旧库**：
+   `release/equipment/equipment.db` 为 **1,380,352 字节 / SHA256 `6F7660F8…` / 文件时间 2026-09-09 12:27**，而当前生产库是 1,503,232 字节 / `B50615C1…`。启动该产物自检确认其数据为 **2147 台（在库 2028 / 外借 119）** —— 即 **缺失 v1.3 全部外借明细补录**（214 台在借状态 + 1 台新建设备 + 4 个双发系外借方）。
+   注：`AGENTS.md` 曾记录「已用工作区生产库覆盖」，但产物的时间戳与哈希与该说法不符 —— 以**产物实测**为准。
+   修复：用当前生产库覆盖交付库（哈希核对一致），旧库移出交付目录留存为证据 `.tmp/release-db-stale-20260909.db`。
+
+**发布产物自检（从交付目录副本启动，端口 8092，禁用自动开浏览器）：**
+
+| 检查项 | 结果 |
+|---|---|
+| 版本 | `version=1.4.0` ✅ |
+| 内嵌前端 | `index-4bdcd131.js`（= 本次发布构建产物）✅ |
+| 数据 | `total=2148`、在库 **1815**、外借 **333** ✅（与生产库一致） |
+| 外借单 | `total=333` ✅ |
+
+**回归验证（全绿）：**
+
+| 项 | 结果 |
+|---|---|
+| `go vet ./...` | exit 0 ✅ |
+| `go test ./... -count=1` | 全绿（含 Phase 5 新增 4 个安全用例）✅ |
+| 前端约定检查脚本 | 6 组全 PASS ✅ |
+| `tsc --noEmit` / `vite build` | ✅ 3339 模块 |
+| 旧版本号残留 | 测试与源码无硬编码 `1.3.0` ✅ |
+
+**未完成的交付待办（必须在目标电脑上做，本环境无法代做）**：Win10/11 全流程走查；Win7 SP1 实机回归（需 Chrome 109 / Firefox ESR 115）；Chrome 109 离线安装包放入 `release/equipment/install/`（本环境无法访问 dl.google.com）。
+
+**另需注意（未擅自处理）**：`release/equipment/backup/` 内有 3 个 128 KB 的历史测试备份（来自早前在交付目录内启动程序时自动生成）。它们不影响运行，但会随目录一起交付；建议发布前清空该目录或由用户自行决定。
 
 ---
 

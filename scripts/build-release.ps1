@@ -7,11 +7,39 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $OutDir = Join-Path $Root 'release\equipment'
 
+# 原生命令统一经此函数调用。
+#
+# 为什么需要它：PowerShell 5.1 会把**原生命令写入 stderr 的普通输出**包装成错误记录，
+# 在 $ErrorActionPreference='Stop' 下直接抛终止性 RemoteException。
+# 而 npm 每次构建都会向 stderr 写警告（如 chunk 体积提示），于是脚本会在第一步被
+# 「构建成功但写了警告」打断（v1.4 Phase 6 实测复现并修复）。
+# 因此这里临时放宽 EAP，改由 $LASTEXITCODE 判定成败——真正的失败仍然会 throw。
+function Invoke-Native {
+  param(
+    [Parameter(Mandatory = $true)][string]$Exe,
+    # 注意：参数名不能叫 $Args —— 那是 PowerShell 的自动变量，会与形参冲突
+    # （表现：参数根本传不过去，被调用方打印用法帮助）。
+    [Parameter(Mandatory = $true)][string[]]$ArgList,
+    [Parameter(Mandatory = $true)][string]$FailMessage
+  )
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & $Exe @ArgList 2>&1 | ForEach-Object { Write-Host $_ }
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $prev
+  }
+  if ($code -ne 0) { throw "$FailMessage（exit=$code）" }
+}
+
 Write-Host '== 1/4 构建前端 =='
 Push-Location (Join-Path $Root 'web')
-if (-not (Test-Path 'node_modules')) { npm install }
-npm run build
-if ($LASTEXITCODE -ne 0) { throw '前端构建失败' }
+if (-not (Test-Path 'node_modules')) {
+  # 沙箱/受限环境下系统 npm 缓存目录可能不可写，统一用仓库内缓存（已在 .gitignore 中）
+  Invoke-Native 'npm' @('install', '--cache', '.npm-cache') 'npm install 失败'
+}
+Invoke-Native 'npm' @('run', 'build') '前端构建失败'
 Pop-Location
 
 Write-Host '== 2/4 用 Go 1.20 工具链编译（Win7 兼容）=='
@@ -27,8 +55,7 @@ if (Test-Path (Join-Path $Root '.gomod\pkg\mod')) {
 }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 Push-Location $Root
-go build -o (Join-Path $OutDir 'equipment.exe') ./cmd/equipment
-if ($LASTEXITCODE -ne 0) { throw 'exe 构建失败' }
+Invoke-Native 'go' @('build', '-o', (Join-Path $OutDir 'equipment.exe'), './cmd/equipment') 'exe 构建失败'
 Pop-Location
 
 Write-Host '== 3/4 组装交付目录 =='
