@@ -4,6 +4,7 @@ import {
 } from 'antd';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { listPagination } from './pagination';
 
 interface Team { id: number; name: string; is_active: boolean }
 interface Category { id: number; name: string }
@@ -154,7 +155,7 @@ export default function TeamViewPage({ onOpenDevice }: { onOpenDevice: (id: numb
             children: (
               <Table
                 rowKey="id" size="small" columns={columns(onOpenDevice)}
-                dataSource={cg.devices} pagination={{ pageSize: 15, showSizeChanger: false }}
+                dataSource={cg.devices} pagination={listPagination()}
               />
             ),
           }))}
@@ -240,7 +241,7 @@ export default function TeamViewPage({ onOpenDevice }: { onOpenDevice: (id: numb
                 <Table
                   rowKey="id" size="small" columns={columns(onOpenDevice)}
                   dataSource={unassigned.devices}
-                  pagination={{ pageSize: 15, showSizeChanger: false }}
+                  pagination={listPagination()}
                 />
               )}
             </Card>
@@ -255,7 +256,7 @@ export default function TeamViewPage({ onOpenDevice }: { onOpenDevice: (id: numb
                 >
                   <Table
                     rowKey="id" size="small" columns={columns(onOpenDevice)}
-                    dataSource={unassigned.devices} pagination={{ pageSize: 10, showSizeChanger: false }}
+                    dataSource={unassigned.devices} pagination={listPagination()}
                   />
                 </Card>
               )}

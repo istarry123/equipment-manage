@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Card, Form, Input, message, Modal, Popconfirm, Space, Switch, Table, Tag } from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { listPagination } from './pagination';
 
 interface Team { id: number; name: string; department: string; is_active: boolean }
 
@@ -135,7 +136,7 @@ export default function TeamsPage() {
         <span>
           说明：名称含「双发」的本厂内部单位（内部调拨，决策 15）与外借公司分开管理；历史记录保存流转当时的名称（快照），改名/停用不影响追溯。
         </span>
-        <Table rowKey="id" loading={loading} columns={columns} dataSource={rows} pagination={false} />
+        <Table rowKey="id" loading={loading} columns={columns} dataSource={rows} pagination={listPagination()} />
       </Space>
 
       <Modal title={editing ? '编辑班组' : '新增班组'} open={open}

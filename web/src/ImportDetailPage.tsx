@@ -16,6 +16,7 @@ import {
 } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { listPagination } from './pagination';
 
 // 外借明细导入（v1.3 Phase 3 解析/匹配预览 + Phase 4 单事务补录）。
 // 口径（决策 19 / 用户 2026-09-11）：以编号为主匹配；同号多台按候选顺序自动分配（可复核改选）；
@@ -639,7 +640,7 @@ export default function ImportDetailPage() {
                 rowKey="source_key"
                 columns={reportCols}
                 dataSource={report.items}
-                pagination={{ pageSize: 20, showSizeChanger: false }}
+                pagination={listPagination()}
                 scroll={{ x: 1200 }}
               />
             </Card>
@@ -721,7 +722,7 @@ export default function ImportDetailPage() {
                   rowKey="source_key"
                   columns={recoCols}
                   dataSource={reco.items}
-                  pagination={{ pageSize: 10, showSizeChanger: false }}
+                  pagination={listPagination()}
                   scroll={{ x: 1200 }}
                 />
               </Space>
@@ -729,15 +730,15 @@ export default function ImportDetailPage() {
           </Card>
 
           <Card title={`同号多台（按候选顺序自动分配）：${preview.ambiguous.length} 条`} size="small">
-            <Table size="small" rowKey="source_key" columns={ambiguousCols} dataSource={preview.ambiguous} pagination={false} scroll={{ x: 1300 }} />
+            <Table size="small" rowKey="source_key" columns={ambiguousCols} dataSource={preview.ambiguous} pagination={listPagination()} scroll={{ x: 1300 }} />
           </Card>
 
           <Card title={`未匹配编号：${preview.missing.length} 条`} size="small">
-            <Table size="small" rowKey="source_key" columns={missingCols} dataSource={preview.missing} pagination={false} scroll={{ x: 1300 }} />
+            <Table size="small" rowKey="source_key" columns={missingCols} dataSource={preview.missing} pagination={listPagination()} scroll={{ x: 1300 }} />
           </Card>
 
           <Card title={`外借方落库计划：${preview.borrowers.length} 个`} size="small">
-            <Table size="small" rowKey="name" columns={borrowerCols} dataSource={preview.borrowers} pagination={false} />
+            <Table size="small" rowKey="name" columns={borrowerCols} dataSource={preview.borrowers} pagination={listPagination()} />
           </Card>
 
           <Card title={`明细预览（前 ${preview.items.length} / ${preview.item_total} 台）`} size="small">
@@ -746,7 +747,7 @@ export default function ImportDetailPage() {
               rowKey="source_key"
               columns={itemCols}
               dataSource={preview.items}
-              pagination={{ pageSize: 20, showSizeChanger: false }}
+              pagination={listPagination()}
               scroll={{ x: 1100 }}
             />
           </Card>
@@ -757,7 +758,7 @@ export default function ImportDetailPage() {
               rowKey="rows"
               columns={blockCols}
               dataSource={preview.blocks}
-              pagination={{ pageSize: 10, showSizeChanger: false }}
+              pagination={listPagination()}
               scroll={{ x: 1300 }}
             />
           </Card>
@@ -768,7 +769,7 @@ export default function ImportDetailPage() {
               rowKey={(r) => `${r.code}-${r.row}-${r.message}`}
               columns={issueCols}
               dataSource={preview.issues}
-              pagination={false}
+              pagination={listPagination()}
             />
           </Card>
         </>

@@ -22,6 +22,7 @@ import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import FlowExportModal from './FlowExportModal';
 import { downloadFile } from './download';
+import { PAGE_SIZE_LEDGER } from './pagination';
 
 // ---------- 类型 ----------
 interface Category { id: number; name: string }
@@ -117,7 +118,7 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
   const [fStatus, setFStatus] = useState<string | undefined>();
   const [fTeam, setFTeam] = useState<number | undefined>();
   const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const pageSize = PAGE_SIZE_LEDGER; // 设备台账总查看：每页 20 条（其他列表 10 条）
 
   const [data, setData] = useState<EqResp | null>(null);
   const [loading, setLoading] = useState(false);

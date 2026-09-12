@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Card, Form, Input, List, message, Popconfirm, Space, Table, Typography } from 'antd';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { listPagination } from './pagination';
 
 interface Category { id: number; name: string; sort: number }
 interface Health { version: string }
@@ -96,7 +97,7 @@ export default function SettingsPage() {
           <Typography.Paragraph type="secondary" style={{ marginBottom: 4 }}>
             新增类别后即可在设备录入/筛选中选择；删除仅限未被任何设备引用的类别（被引用时需先调整设备类别）。
           </Typography.Paragraph>
-          <Table rowKey="id" size="small" columns={columns} dataSource={categories} pagination={false} />
+          <Table rowKey="id" size="small" columns={columns} dataSource={categories} pagination={listPagination()} />
           <Form form={form} layout="inline">
             <Form.Item name="name" rules={[{ required: true, message: '请输入类别名称' }]}>
               <Input placeholder="新类别名称，如：裁剪设备" style={{ width: 240 }} />

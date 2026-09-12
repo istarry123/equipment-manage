@@ -5,6 +5,7 @@ import {
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
+import { PAGE_SIZE_LIST, listPagination } from './pagination';
 
 interface BorrowItem {
   id: number; equipment_id: number;
@@ -260,7 +261,7 @@ export default function BorrowsPage() {
         <Table rowKey="id" loading={loading} size="middle" columns={columns}
           dataSource={data?.items ?? []}
           pagination={{
-            current: page, pageSize: 50, total: data?.total ?? 0, showSizeChanger: false,
+            current: page, pageSize: PAGE_SIZE_LIST, total: data?.total ?? 0, showSizeChanger: false,
             onChange: (p) => setPage(p), showTotal: (t) => `共 ${t} 条`,
           }} />
       </Card>
@@ -269,7 +270,7 @@ export default function BorrowsPage() {
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
           内部单位（含「双发」的本厂分厂）请在「班组管理」中维护（内部调拨），本表仅维护外部借出单位。
         </Typography.Paragraph>
-        <Table rowKey="id" size="small" columns={borrowerColumns} dataSource={borrowers} pagination={false} />
+        <Table rowKey="id" size="small" columns={borrowerColumns} dataSource={borrowers} pagination={listPagination()} />
       </Card>
 
       {/* 归还 */}

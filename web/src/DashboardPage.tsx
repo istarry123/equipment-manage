@@ -3,6 +3,7 @@ import { Alert, Button, Card, Col, Row, Space, Statistic, Table, Tag, Typography
 import { ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as echarts from 'echarts';
+import { listPagination } from './pagination';
 
 interface StatusCount { status: string; count: number }
 interface NameCount { name: string; count: number }
@@ -173,7 +174,7 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
             <Col span={12}>
               <Card title="最近流转" size="small">
                 <Table rowKey={(r) => `${r.equipment_id}-${r.occurred_at}-${r.action_text}`} size="small"
-                  columns={flowCols} dataSource={d.recent_flows ?? []} pagination={false} />
+                  columns={flowCols} dataSource={d.recent_flows ?? []} pagination={listPagination()} />
               </Card>
             </Col>
             <Col span={12}>
@@ -183,7 +184,7 @@ export default function DashboardPage({ onOpenTeamView }: { onOpenTeamView?: () 
                 extra={<Tag color={d.overdue_count > 0 ? 'red' : 'green'}>{d.overdue_count > 0 ? `${d.overdue_count} 台逾期` : '无逾期'}</Tag>}
               >
                 <Table rowKey="borrow_record_id" size="small" columns={borrowCols}
-                  dataSource={d.current_borrows ?? []} pagination={false} />
+                  dataSource={d.current_borrows ?? []} pagination={listPagination()} />
               </Card>
             </Col>
           </Row>
@@ -242,7 +243,7 @@ function TeamCategoryMatrix({
       extra={onOpenTeamView && <Button type="link" onClick={onOpenTeamView}>查看全部班组设备 →</Button>}
     >
       <Table
-        rowKey="team" size="small" pagination={false}
+        rowKey="team" size="small" pagination={listPagination()}
         dataSource={colData}
         columns={[
           { title: '班组', dataIndex: 'team', width: 140, fixed: 'left' as const },

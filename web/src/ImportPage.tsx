@@ -14,6 +14,7 @@ import {
 } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { listPagination } from './pagination';
 
 // ---------- 与后端约定 ----------
 interface Summary {
@@ -510,7 +511,7 @@ export default function ImportPage() {
               size="small"
               columns={deviceColumns}
               dataSource={devices}
-              pagination={{ pageSize: 10, showSizeChanger: false }}
+              pagination={listPagination()}
             />
           </Card>
 
@@ -542,7 +543,7 @@ export default function ImportPage() {
                   size="small"
                   columns={suspectColumns}
                   dataSource={suspects}
-                  pagination={{ pageSize: 10, showSizeChanger: false }}
+                  pagination={listPagination()}
                 />
               </>
             )}
@@ -569,7 +570,7 @@ export default function ImportPage() {
                   size="small"
                   columns={reviewColumns}
                   dataSource={reviews}
-                  pagination={{ pageSize: 10, showSizeChanger: false }}
+                  pagination={listPagination()}
                 />
               </>
             )}
@@ -583,7 +584,7 @@ export default function ImportPage() {
                 size="small"
                 columns={issueColumns}
                 dataSource={issues}
-                pagination={{ pageSize: 10 }}
+                pagination={listPagination()}
               />
             </Card>
           )}
@@ -594,7 +595,7 @@ export default function ImportPage() {
               size="small"
               columns={groupColumns}
               dataSource={groups}
-              pagination={{ pageSize: 10 }}
+              pagination={listPagination()}
             />
           </Card>
 
@@ -650,7 +651,7 @@ export default function ImportPage() {
               <Typography.Paragraph style={{ marginTop: 12 }} type="secondary">
                 当前系统共 {eq.total} 台设备（前 200 条）：
               </Typography.Paragraph>
-              <Table rowKey="id" size="small" columns={eqColumns} dataSource={eq.items.slice(0, 50)} pagination={false} />
+              <Table rowKey="id" size="small" columns={eqColumns} dataSource={eq.items.slice(0, 50)} pagination={listPagination()} />
             </>
           )}
         </Card>
@@ -690,7 +691,7 @@ export default function ImportPage() {
                   size="small"
                   columns={reconDiffColumns}
                   dataSource={[...reconcile.missing, ...reconcile.extra]}
-                  pagination={{ pageSize: 10 }}
+                  pagination={listPagination()}
                 />
               ) : (
                 <Alert type="success" showIcon message="无缺失 / 无多出，Excel 与数据库完全一致。" />
