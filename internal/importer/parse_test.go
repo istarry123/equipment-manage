@@ -268,9 +268,15 @@ func TestClassifyF(t *testing.T) {
 // writeMiniXLSX 生成一个最小 xlsx（无合并单元格），R2 表头、R5 起数据。
 func writeMiniXLSX(t *testing.T, rows [][]string) string {
 	t.Helper()
+	headers := []string{"类别", "设备名称", "设备型号", "台账数量", "财务数量", "台账设备编号", "时间", "公司", "台数", "借出设备编号", "备注"}
+	return writeMiniXLSXWithHeaders(t, headers, rows)
+}
+
+// writeMiniXLSXWithHeaders 生成指定 R2 表头的最小 xlsx（用于模板校验测试）。
+func writeMiniXLSXWithHeaders(t *testing.T, headers []string, rows [][]string) string {
+	t.Helper()
 	f := excelize.NewFile()
 	sheet := "Sheet1"
-	headers := []string{"类别", "设备名称", "设备型号", "台账数量", "财务数量", "台账设备编号", "时间", "公司", "台数", "借出设备编号", "备注"}
 	for i, h := range headers {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 2)
 		if err := f.SetCellStr(sheet, cell, h); err != nil {

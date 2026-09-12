@@ -74,6 +74,12 @@
     - 导入与历史：J 列只产生流转事件、**不新建设备**；历史借出进 flow_record（可多次），borrow_record 仅在“可靠当前在借”时建档；手工借出/归还支持历史日期（默认今天、不得晚于今天）；借出记录保存设备/名称/型号快照与 source；导入批次幂等（import_batch + source key）；事务提交 + 审计 + Reconciliation。
     - 流程：Phase 0(备份)→1(V003)→2(seq/身份)→3(Parser)→4(Importer)→5(Borrow历史日期)→6(J列事件)→7(状态推导)→8(Frontend display_no)→9(Preview/Review)→10(真实Excel终验/清空重导)→11(对账)→12(回归)→13(文档)。每 Phase 测试+提交。
 
+19. **v1.3 外借明细补充导入（2026-09-11，用户确认；起因：`工作簿1.xlsx` 导入预览显示「预计新增设备 5,693,048 台」事故）**：
+    - 事故根因：解析器按 `设备借出总账.xlsx` 的固定列位（A–K）硬解析且**从不校验表头** → `工作簿1.xlsx`（版式：到达时间/外借方/数量/设备编号）的 B 列外借方被当作设备名称、C 列数量被当作型号、**D 列设备编号被当作台账数量**（其中 20 个数字型单元格合计 5,693,048），F 列（台账编号）为空 → 全部按「无编号」逐台展开。数据库未受影响（日志仅有 `/api/import/parse`，无 `/api/import/run`）。该文件实际 **230 台**（214 有编号 + 16 无编号）。
+    - 用户口径（2026-09-11，4 条答复）：①**双发系**（莒县双发、双发分厂（龙山贸易/华锦/夏津））在本明细中**按外借方(borrower)处理、目标状态 BORROWED**——覆盖决策 15 的内部单位口径（仅限本明细，理由：双发→双发分厂属借出行为）；②台数**以 C 列（数量）为准 = 230 台**，源文件表末 C72=208 视为笔误；③**无编号 16 台跳过**（R44=14、R65=1、R66=1）；④D 列括号注释（带拖布轮）只保留编号、注释进备注。补充口径：⑤`0430701` = 2018.1.22 借给莒县双发（库中不存在，按新建处理，Phase 3 定稿）；⑥外借参数 = 外借日期取到达时间、预计归还日期留空、操作人「系统导入」、备注=源行号+原文。
+    - 待确认（不猜测，Phase 3 前定稿）：库中同号多台 12 个编号（各 2 台）的消歧机制——用户初步意见「先用『预分配1/预分配2』暂代设备名称与型号」，具体匹配/落库规则待定稿。
+    - 分阶段（每 Phase 测试 + 提交 + STOP 等验收）：**Phase 1 模板校验 ✅** → Phase 2 外借明细解析器 → Phase 3 匹配/预览/确认（歧义与未匹配交人工）→ Phase 4 单事务写入（BORROWED + borrow_record + flow_record）+ 对账。
+
 ## 6. 当前项目状态（每次阶段推进后更新）
 
 - Git：`main` 分支已初始化；基线提交完成（主章程 + 本治理文件 + 内嵌 Skill + `设备借出总账.xlsx` 入库）。
@@ -92,4 +98,5 @@
 - v1.1 Phase 13（Documentation）要点：版本号升至 **v1.1.0**（后端 + 前端页脚，用户确认）；`docs/user-guide.md` 重写为 v1.1 语义（显示编号规则、导入五步流程：解析→预览→REVIEW 审阅/疑似在借→导入→对账、清空重导、历史日期、FAQ Q4–Q8）；`README.md` 版本表新增 v1.1.0；`docs/database-design.md` 补 V003/V004 迁移与 import_batch/equipment_seq/display_no；`docs/roadmap.md` 补决策 18 完成记录；AGENTS 进度线收口 Phase 13 → tag `v1.1.0`（本次提交）。
 - 基线（v1.0.0，2026-09-08）：Phase 0–6 完成，tag v1.0.0；发布构建脚本产出 `release/equipment/`；用户手册/FAQ/Win7 浏览器说明就绪；Win7 实机 0xc0000005 问题待用户回传 EQ_STEPLOG。
 - **v1.2 设备流转情况导出（2026-09-09，执行依据：《Equipment Flow Export v1.1——完整 Codex 实现 Prompt.md》根目录文件）**：Phase 1 查询层（`service/flow_export.go`：FlowExportFilter team_id/status/borrower_id + include_current/history/summary，三组批量查询无 N+1，current_location/historyLocation 推导，历史按 equipment_id 关联）→ Phase 2 XLSX（`service/flow_export_xlsx.go`：三 Sheet 当前流转情况/流转历史/统计汇总，标题合并加粗/表头冻结+AutoFilter/列宽/编号文本写入 SetCellStr/日期格式统一/隐藏设备ID列/空数据占位）→ Phase 3 API（`GET /api/export/flow`，中文文件名 RFC5987，审计 EXPORT_EQUIPMENT_FLOW 记筛选+数量不存二进制）→ Phase 4 前端（台账页「导出设备台账」「导出流转情况」两按钮 + `FlowExportModal` 筛选/数据范围/含统计 + Blob 下载 + loading/防重复）→ Phase 5 测试与对账（13 用例 + 集成 + 2000 台 + 真实库对账 2147↔Sheet1、2266↔Sheet2 PASS）→ **Phase 6 收尾（本次）**：版本升 **v1.2.0** + tag `v1.2.0`。口径锁定：状态用词「在库」、历史显示当前名称（不新增快照字段）、导出记审计。
-- 最终验收待办（目标电脑）：① Win10/11 全流程走查；② Win7 SP1 实机回归（需 Chrome109/FF115）；③ Chrome109 离线包放入 install/；④ v1.1 全流程（状态推导→display_no→Preview/Review→清空重导→对账→回归→文档）验收；⑤ v1.2 导出流程走查。
+- **v1.3 导入安全加固（2026-09-11，决策 19）**：**Phase 1 模板校验 ✅ 本次** —— `importer.Parse` 读取 R2 表头后先执行 `validateTemplate`（与模板 A–K 逐列比对），不符返回 `ErrTemplateMismatch`（API 400 + 中文提示，回显 R2 实际内容与 R1 标题行）；新增 V11 校验规则。效果：`工作簿1.xlsx` 由「预计新增 5,693,048 台」变为**明确拒绝并说明原因**，真实 `设备借出总账.xlsx` 解析结果不变（198 组 / 2147 台 / 144 借出事件 / 119 疑似 / 57 REVIEW）；新增 `internal/importer/template_test.go`（4 用例）+ `docs/import-rules.md` §2/V11/新增章节；`go test ./... -count=1` 与 `go vet ./...` 全绿。后续 Phase 2（外借明细解析器）待用户验收 Phase 1 后开始。
+- 最终验收待办（目标电脑）：① Win10/11 全流程走查；② Win7 SP1 实机回归（需 Chrome109/FF115）；③ Chrome109 离线包放入 install/；④ v1.1 全流程（状态推导→display_no→Preview/Review→清空重导→对账→回归→文档）验收；⑤ v1.2 导出流程走查；⑥ v1.3 Phase 1 模板校验实测（上传非模板文件应被拒绝并提示）。

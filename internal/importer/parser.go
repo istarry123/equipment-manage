@@ -5,6 +5,7 @@ package importer
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -15,6 +16,78 @@ import (
 
 	"github.com/xuri/excelize/v2"
 )
+
+// templateHeader 导入模板 R2 表头（A–K，语义固定；docs/import-rules.md §2.1）。
+// 解析器按固定列位取值，因此表头必须逐列一致，否则列语义会整体错位。
+var templateHeader = []string{
+	"类别", "设备名称", "设备型号", "台账数量", "财务数量", "台账设备编号",
+	"时间", "公司", "台数", "借出设备编号", "备注",
+}
+
+// ErrTemplateMismatch 文件列布局不符合导入模板（拒绝解析，绝不按固定列位硬解析错位数据）。
+//
+// 事故背景（2026-09-11，用户上报）：工作簿1.xlsx 为「到达时间/外借方/数量/设备编号」版式，
+// 被按总账模板硬解析 → D 列“设备编号”被当成“台账数量”、B 列“外借方”被当成“设备名称”，
+// 预览显示“预计新增设备 5,693,048 台”（该文件实际仅 208~230 台）。
+var ErrTemplateMismatch = errors.New("文件列布局不符合导入模板")
+
+// validateTemplate 校验 R2 表头与导入模板 A–K 是否逐列一致。
+// 不一致即返回 ErrTemplateMismatch，并在错误信息中回显 R2（表头行）与 R1（标题行）的实际内容，
+// 便于用户判断“版式不对”还是“表头挪了行”；不做模糊匹配、不猜测列语义（engineering-persona §5）。
+func validateTemplate(title, header []string) error {
+	var mismatch []string
+	for i, want := range templateHeader {
+		got := cellAt(header, i)
+		col := string(rune('A' + i))
+		switch {
+		case got == "":
+			mismatch = append(mismatch, fmt.Sprintf("%s列(期望 %q，实际为空)", col, want))
+		case got != want:
+			mismatch = append(mismatch, fmt.Sprintf("%s列(期望 %q，实际 %q)", col, want, got))
+		}
+	}
+	if len(mismatch) == 0 {
+		return nil
+	}
+	shown := mismatch
+	if len(shown) > 6 {
+		shown = shown[:6]
+	}
+	parts := []string{fmt.Sprintf("第 %d 行必须是表头 A–K（%s）", sheetHeaderRow, strings.Join(templateHeader, "/"))}
+	if vals := echoRow(header); vals != "" {
+		parts = append(parts, fmt.Sprintf("实际识别到第 %d 行：%s", sheetHeaderRow, vals))
+	}
+	if vals := echoRow(title); vals != "" {
+		parts = append(parts, fmt.Sprintf("第 %d 行：%s", sheetTitleRow, vals))
+	}
+	parts = append(parts, fmt.Sprintf("不一致项（前 %d 条）：%s", len(shown), strings.Join(shown, "；")))
+	parts = append(parts, "请改用系统导入模板（设备借出总账.xlsx 版式）后重试")
+	return fmt.Errorf("%w：%s", ErrTemplateMismatch, strings.Join(parts, "；"))
+}
+
+// cellAt 取行内第 i 列（越界返回空串）。
+func cellAt(row []string, i int) string {
+	if i < 0 || i >= len(row) {
+		return ""
+	}
+	return row[i]
+}
+
+// echoRow 把一行单元格渲染为 `A="x"、B="y"` 形式（最多 6 个非空值，超长截断），用于错误回显。
+func echoRow(row []string) string {
+	var out []string
+	for i := 0; i < len(templateHeader) && len(out) < 6; i++ {
+		v := cellAt(row, i)
+		if v == "" {
+			continue
+		}
+		if utf8.RuneCountInString(v) > 24 {
+			v = string([]rune(v)[:24]) + "…"
+		}
+		out = append(out, fmt.Sprintf("%s=%q", string(rune('A'+i)), v))
+	}
+	return strings.Join(out, "、")
+}
 
 // 列常量（0-based 对应 A..K）。
 const (
@@ -175,9 +248,19 @@ func Parse(path string) (*ParseResult, error) {
 		return strings.TrimSpace(v)
 	}
 
-	header := make([]string, 11)
-	for c := 1; c <= 11; c++ {
-		header[c-1] = cell(c, sheetHeaderRow)
+	readRow := func(row int) []string {
+		out := make([]string, 11)
+		for c := 1; c <= 11; c++ {
+			out[c-1] = cell(c, row)
+		}
+		return out
+	}
+	header := readRow(sheetHeaderRow)
+
+	// Phase 1（2026-09-11）：模板校验前置。列布局不符一律拒绝，
+	// 绝不在错误的列语义下继续解析（否则会静默产生海量错误设备）。
+	if err := validateTemplate(readRow(sheetTitleRow), header); err != nil {
+		return nil, err
 	}
 
 	res := &ParseResult{Sheet: sheet, Header: header}
