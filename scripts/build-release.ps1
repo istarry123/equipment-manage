@@ -69,8 +69,21 @@ Copy-Item (Join-Path $Root 'docs\user-guide.md') $OutDir -Force
 Copy-Item (Join-Path $Root 'scripts\update-app.ps1') $OutDir -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir 'install') | Out-Null
 
+# 「仅升级」包：客户已在使用（有自己的数据）时，只能发这个包，
+# 只含程序 + 升级脚本 + 手册，**不含任何数据文件**，避免运维误拷 equipment.db 覆盖客户数据。
+# 必须每次随发布重建——否则运维会拿到过期包把客户升级回旧版本
+# （v1.4 Phase 6 演练发现 release\update-only\ 是 2026-09-10 的旧包）。
+Write-Host '== 3.5/4 组装「仅升级」包 =='
+$UpdateDir = Join-Path $Root 'release\update-only'
+New-Item -ItemType Directory -Force -Path $UpdateDir | Out-Null
+foreach ($f in @('equipment.exe', 'update-app.ps1', 'user-guide.md')) {
+  Copy-Item (Join-Path $OutDir $f) $UpdateDir -Force
+}
+Get-ChildItem $UpdateDir -Force | Select-Object Name, Length
+
 Write-Host '== 4/4 完成 =='
 Write-Host ('产物目录: ' + $OutDir)
+Write-Host ('仅升级包: ' + $UpdateDir + '（客户已有数据时只发这个包）')
 Get-ChildItem $OutDir -Force | Select-Object Name, Length
 Write-Host ''
 Write-Host '提示:'
