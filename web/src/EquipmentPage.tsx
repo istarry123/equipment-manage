@@ -24,6 +24,7 @@ import FlowExportModal from './FlowExportModal';
 import { downloadFile } from './download';
 import { PAGE_SIZE_LEDGER } from './pagination';
 import { STATUS_FILTER_OPTIONS, statusTagColor, statusText } from './status';
+import DangerNotice from './DangerNotice';
 
 // ---------- 类型 ----------
 interface Category { id: number; name: string }
@@ -546,9 +547,16 @@ export default function EquipmentPage({ requestOpenId }: { requestOpenId?: numbe
 
       {/* 流转操作 */}
       <Modal title={ACTION_TEXT[flowAction] || '流转操作'} open={!!flowAction}
-        onCancel={() => setFlowAction('')} onOk={() => void submitFlow()} confirmLoading={flowSaving}>
+        onCancel={() => setFlowAction('')} onOk={() => void submitFlow()} confirmLoading={flowSaving}
+        okButtonProps={{ danger: flowAction === 'SCRAP' }}>
         <Alert style={{ marginBottom: 12 }} type="info" showIcon
           message="每次操作将同步更新当前状态并写入流转历史（可追溯）。" />
+        {flowAction === 'SCRAP' && (
+          <DangerNotice
+            message="报废为终态：设备报废后不可再流转。"
+            description="本操作不可撤销（如需继续使用，只能重新录入设备）；报废原因必填并记入流转历史。"
+          />
+        )}
         <Form form={formFlow} labelCol={{ span: 6 }} wrapperCol={{ span: 17 }}>
           {flowNeedsTeam && (
             <Form.Item name="to_team_id" label={flowAction === 'OUT_TO_TEAM' ? '目标班组' : '新班组'}

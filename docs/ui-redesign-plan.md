@@ -280,9 +280,45 @@ node .tmp\dashboard-model-check.cjs
 
 **未验证项**：吸顶表头在真实滚动中的表现、等宽编号的观感、1366×768 下的工具条折行 —— 需浏览器目视。
 
-### Phase 5 — 关键流程与危险操作
+### Phase 5 — 关键流程与危险操作 ✅（2026-09-12 完成）
 - **范围**：设备详情抽屉时间线、流转弹窗、导入五步流程、清空重导二次确认的统一样式与文案层级。
 - **验收**：安全约束逐条实测（REVIEW 门禁 422、清空重导二次确认、历史日期不得晚于今天、无删除入口）。
+
+**实施记录：**
+
+1. **新增安全不变量测试** `internal/api/safety_test.go`（4 用例）—— 把铁律「危险操作必须受控」中**此前未被任何测试锁定**的部分固化：
+   - `TestNoEquipmentDeleteRoute`：`DELETE /api/equipment/:id`、`/api/equipment`、`/equipment/:id/flow`、`/equipment/:id/transactions` 全部 404（设备禁止物理删除，决策 6）
+   - `TestEquipmentNumberNotEditableViaPut`：`PUT /api/equipment/:id` **夹带 `equipment_no` 也被忽略**（决策 13）。该性质目前由「请求结构体不含该字段」这一**结构设计**保证，此测试把它锁住，防止日后被无意放开；同时断言 name/model 正常更新（证明不是整个请求被丢弃）
+   - `TestRestoreRequiresConfirm`：缺 filename → 400；`confirm` 缺省/为 false → 400；并断言 400 响应是**统一错误体**（`error.code` 为 HTTP 状态码、`error.message` 可读）
+   - `TestScrappedIsTerminalViaAPI`：报废设备尝试 4 种流转动作全部 400，且**状态未被改写、流转历史条数未增加**（失败请求必须无副作用）
+2. **新增 `web/src/DangerNotice.tsx`**：统一危险操作文案层级（`message` = 做什么 → `description` = 后果与可回退性），应用于**报废 / 清空重导 / 恢复备份**三处。
+   - 边界写进组件注释：**只统一呈现，不改变任何确认门槛**（不新增/不取消二次确认、确认词、必填原因）——安全门槛的调整必须单独提出并由用户确认。
+3. **修掉流转弹窗两个真实缺口**（Phase 5 实测发现）：
+   - 报废动作**没有任何终态后果说明**（只有"报废原因"必填）→ 补 `DangerNotice`：「报废为终态：设备报废后不可再流转；本操作不可撤销（如需继续使用只能重新录入）」；
+   - 报废的 Modal **确认按钮不是危险色** → `okButtonProps={{ danger: flowAction === 'SCRAP' }}`。
+
+**安全约束逐条实测结果（全部通过）：**
+
+| 验收项 | 锁定方式 | 实测结果 |
+|---|---|---|
+| 无设备删除入口 | 🆕 `TestNoEquipmentDeleteRoute` + 实机 | 4 条路径全部 **404**；实机 `DELETE /api/equipment/1`、`/api/equipment` 亦 404 ✅ |
+| 设备编号不可直接修改（决策 13） | 🆕 `TestEquipmentNumberNotEditableViaPut` + 实机 | PUT 夹带 `equipment_no=SMOKE-9999` → 200 但编号仍为 `6040` ✅ |
+| 恢复需确认（铁律 5） | 🆕 `TestRestoreRequiresConfirm` + 实机 | 缺 filename / `confirm:false` → **400** 且统一错误体；实机 400 ✅ |
+| 报废为终态（决策 4） | 🆕 `TestScrappedIsTerminalViaAPI` | 4 种动作全 400；状态仍 SCRAPPED；**流转历史条数未变** ✅ |
+| 导入 REVIEW 门禁 422 | 既有 `TestImportRunReviewGate`（断言 `StatusUnprocessableEntity`） | PASS ✅ |
+| 历史日期不得晚于今天 | 既有 `TestDoFlowHistoricalDate` + 实机 | PASS；实机未来日期 `2099-01-01` → **400** ✅ |
+| 清空重导需二次确认 | 既有 `TestImportResetAndReimport` | PASS ✅ |
+| 班组/类别受控删除 | 既有 `TestDeleteDictAPI` | PASS ✅ |
+
+**未改（因为已经比统一模板更好）**：`ImportDetailPage` 的「确认补录」弹窗后果说明本就比通用模板更细（含补录范围与外借方台数清单），**不做降级**替换。
+
+**发现的安全强度不对称（只提出，未擅自改）**：「恢复备份」（覆盖全部数据）要求**输入 `RESTORE` 确认词**，而「清空重导」（清空全部业务数据）**只需点一次确认**。两者都属于最高风险档，建议把清空重导也改为输入确认词。由于这是**安全门槛变更**（会增加操作步骤、影响既有使用习惯），本阶段仅提出建议，等用户决定。
+
+**本阶段如实未做**：设备详情抽屉的流转历史仍为**表格**形态，未改为可视化时间线。原因：属纯呈现重构、改动集中在 `EquipmentPage` 抽屉区，且本环境无法目视校准；建议作为 Phase 5 的追加迭代，或并入 Phase 6 一并验收（见阶段报告待决项）。
+
+**验证**：`tsc --noEmit` ✅、`vite build` ✅（3339 模块 / JS 2.28 MB）、`go build ./...` ✅、`go test ./... -count=1` **全绿**（含 4 个新安全用例）✅、前端约定检查脚本 **6 组全 PASS** ✅；实机安全实测 4 项全部符合预期；冒烟测试写过的预览数据副本已**还原为与生产库字节一致**（SHA256 `B50615C1…`），生产库全程未变。
+
+**未验证项**：`DangerNotice` 在弹窗中的视觉观感、报废弹窗危险色确认按钮的实际显示 —— 需浏览器目视。
 
 ### Phase 6 — 交付与回归
 - **范围**：Win10/11 + Win7 SP1（Chrome 109 / FF115）实测；`scripts/build-release.ps1` 重建 `release/equipment/`；版本升 v1.4.0；更新 `docs/user-guide.md`（界面说明）；tag `v1.4.0`。

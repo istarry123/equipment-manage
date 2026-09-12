@@ -3,6 +3,7 @@ import { Alert, Button, Card, message, Modal, Space, Table, Tag, Typography } fr
 import { ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { listPagination } from './pagination';
+import DangerNotice from './DangerNotice';
 
 interface BackupFile { name: string; size: number; mod_time: string }
 
@@ -124,7 +125,7 @@ export default function BackupPage() {
         okText="确认恢复"
       >
         <Space direction="vertical">
-          <Alert type="warning" showIcon
+          <DangerNotice
             message="恢复将以该备份覆盖当前数据库全部数据。"
             description="执行前系统会自动保留一份当前库快照；本操作不可撤销（除从快照再恢复）。" />
           <Typography.Text>请输入 <Tag>RESTORE</Tag> 以确认：</Typography.Text>

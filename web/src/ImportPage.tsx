@@ -16,6 +16,7 @@ import { UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { listPagination } from './pagination';
 import { statusTagColor, statusText } from './status';
+import DangerNotice from './DangerNotice';
 
 // ---------- 与后端约定 ----------
 interface Summary {
@@ -238,12 +239,12 @@ export default function ImportPage() {
   const confirmReset = useCallback(() => {
     Modal.confirm({
       title: '清空重导（危险操作）',
+      width: 520,
       content: (
-        <span>
-          将先<b>自动备份</b>当前数据库，然后<b>清空全部业务数据</b>（设备 / 流转历史 / 外借单 / 导入批次）；
-          类别、班组、外借方字典与操作审计保留。清空后需重新上传 Excel 全量导入。<br />
-          <Typography.Text type="danger">此操作不可撤销（可从备份恢复）。</Typography.Text>
-        </span>
+        <DangerNotice
+          message="将清空全部业务数据：设备 / 流转历史 / 外借单 / 导入批次。"
+          description="执行前会自动备份当前数据库（可从备份恢复）；类别、班组、外借方字典与操作审计保留。清空后需重新上传 Excel 全量导入。"
+        />
       ),
       okText: '我已备份确认，清空',
       okButtonProps: { danger: true },
