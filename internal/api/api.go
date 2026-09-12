@@ -46,9 +46,10 @@ func New(db *gorm.DB, version string) *gin.Engine {
 		api.POST("/import/reset", ih.Reset)
 		api.POST("/import/reconcile", ih.Reconcile)
 
-		// 外借明细通道（v1.3 Phase 3：解析 + 匹配预览，只读）
+		// 外借明细通道（v1.3 Phase 3 解析/匹配预览；Phase 4 单事务补录）
 		dh := &importDetailHandler{server: s, store: s.details}
 		api.POST("/import/borrow-detail/parse", dh.ParseDetail)
+		api.POST("/import/borrow-detail/run", dh.RunDetail)
 
 		api.GET("/equipment", s.ListEquipment)
 		api.POST("/equipment", s.CreateEquipment)

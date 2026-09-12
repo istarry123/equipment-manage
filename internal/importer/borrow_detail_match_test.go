@@ -83,28 +83,29 @@ func TestMatchBorrowDetailBuckets(t *testing.T) {
 	if it := byNo["1001"][0]; it.Status != MatchUnique || it.Chosen == nil || it.Chosen.Name != "平车" {
 		t.Fatalf("1001 应唯一命中: %+v", it)
 	}
-	// 3003：文件出现 2 次、库中 2 台 → 顺序建议（预分配1/预分配2），但仍需人工确认
+	// 3003：文件出现 2 次、库中 2 台 → 按候选顺序自动分配（预分配1/预分配2），可复核改选
 	for i, it := range byNo["3003"] {
 		if it.Status != MatchAmbiguous {
-			t.Fatalf("3003 应为 AMBIGUOUS（需确认）: %+v", it)
+			t.Fatalf("3003 应为 AMBIGUOUS（保留人工关注标记）: %+v", it)
 		}
 		if len(it.Candidates) != 2 || it.Candidates[0].Label != "预分配1" || it.Candidates[1].Label != "预分配2" {
 			t.Fatalf("3003 候选标签异常: %+v", it.Candidates)
 		}
+		if !it.AutoOrder || it.Chosen == nil || it.Chosen.EquipmentID != it.Candidates[i].EquipmentID {
+			t.Fatalf("3003 第 %d 次出现应按候选顺序分配 %s: %+v", i+1, it.Candidates[i].Label, it)
+		}
 		if it.SuggestedID != it.Candidates[i].EquipmentID {
-			t.Fatalf("3003 第 %d 次出现应建议 %s，实际 %d", i+1, it.Candidates[i].Label, it.SuggestedID)
+			t.Fatalf("3003 建议 id 应与自动分配一致: %+v", it)
 		}
-		if !strings.Contains(it.Note, "按出现顺序") {
-			t.Fatalf("3003 应给出顺序建议说明: %q", it.Note)
+		if !strings.Contains(it.Note, "按候选顺序") {
+			t.Fatalf("3003 应说明按候选顺序分配: %q", it.Note)
 		}
 	}
-	// 2003：库中 2 台、文件只出现 1 次 → 无法定位，无顺序建议
+	// 2003：库中 2 台、文件只出现 1 次 → 仍按候选顺序取第 1 台（可复核改选）
 	it2003 := byNo["2003"][0]
-	if it2003.Status != MatchAmbiguous || it2003.SuggestedID != 0 {
-		t.Fatalf("2003（文件仅 1 次 vs 库 2 台）不应有顺序建议: %+v", it2003)
-	}
-	if !strings.Contains(it2003.Note, "请人工选择") {
-		t.Fatalf("2003 应提示人工选择: %q", it2003.Note)
+	if it2003.Status != MatchAmbiguous || !it2003.AutoOrder || it2003.Chosen == nil ||
+		it2003.Chosen.EquipmentID != it2003.Candidates[0].EquipmentID {
+		t.Fatalf("2003 应按候选顺序自动分配第 1 台: %+v", it2003)
 	}
 	// 2002 带 预分配2 → BY_LABEL 命中第二台（平车 DDL-9000B）
 	it2002 := byNo["2002"][0]

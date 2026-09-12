@@ -32,8 +32,13 @@ const (
 	MatchMissing   = "MISSING"
 )
 
-// PreAssignLabel 同号多台的占位标签（方案 A）：预分配1、预分配2…
+// PreAssignLabel 同号多台的候选占位标签（方案 A）：预分配1、预分配2…
 func PreAssignLabel(i int) string { return fmt.Sprintf("预分配%d", i) }
+
+// BorrowLabel 外借标签（用户口径 2026-09-11）：按**外借方**各自从 1 起，
+// 对文件中没有型号的设备按出现顺序编号 → 外借1、外借2…；该标签只写入
+// 外借单/流转记录的备注，不修改设备台账中的真实名称与型号。
+func BorrowLabel(i int) string { return fmt.Sprintf("外借%d", i) }
 
 // MatchCandidate 一个候选设备（同号多台时携带 预分配N 标签）。
 type MatchCandidate struct {
@@ -63,9 +68,11 @@ type DetailMatchItem struct {
 	Occurrence  int               `json:"occurrence"`  // 该编号在本文件第几次出现（1 起）
 	Occurrences int               `json:"occurrences"` // 该编号在本文件出现总次数
 	Status      string            `json:"status"`
+	Label       string            `json:"label,omitempty"` // 外借N（按外借方顺序；仅文件中无型号的设备）
 	Chosen      *MatchCandidate   `json:"chosen,omitempty"`
 	Candidates  []*MatchCandidate `json:"candidates,omitempty"`
-	SuggestedID uint              `json:"suggested_equipment_id,omitempty"` // 顺序建议（需用户确认）
+	SuggestedID uint              `json:"suggested_equipment_id,omitempty"` // 顺序建议 / 自动分配结果
+	AutoOrder   bool              `json:"auto_order,omitempty"`             // 同号多台按候选顺序自动分配（可在预览复核）
 	Note        string            `json:"note,omitempty"`
 	Evidence    string            `json:"evidence,omitempty"` // MISSING 行的旁证（仅供参考）
 }
@@ -77,6 +84,9 @@ type BorrowerPlan struct {
 	BorrowerID uint   `json:"borrower_id,omitempty"`
 	Devices    int    `json:"devices"`
 	Blocks     int    `json:"blocks"`
+	Labeled    int    `json:"labeled"`    // 打了 外借N 标签的台数（文件中无型号）
+	LabelFrom  string `json:"label_from"` // 首个标签（如 外借1）
+	LabelTo    string `json:"label_to"`   // 末个标签（如 外借95）
 }
 
 // DetailMatchResult 匹配结果（供预览与后续写入）。
@@ -193,6 +203,7 @@ func MatchBorrowDetail(db *gorm.DB, res *DetailParseResult) (*DetailMatchResult,
 
 	// 4) 逐台匹配（保持文件顺序）
 	occurIdx := map[string]int{}
+	labelIdx := map[string]int{} // 外借方 → 已编号数（文件无型号的设备按出现顺序顺延）
 	borrowerAgg := map[string]*BorrowerPlan{}
 	borrowerOrder := []string{}
 	for _, d := range res.Devices {
@@ -214,6 +225,11 @@ func MatchBorrowDetail(db *gorm.DB, res *DetailParseResult) (*DetailMatchResult,
 					out.MaxBorrowDate = item.BorrowDate
 				}
 			}
+			// 外借标签：文件未给型号的设备，按外借方顺序 外借1、外借2…
+			if blk.Company != "" && strings.TrimSpace(blk.Model) == "" {
+				labelIdx[blk.Company]++
+				item.Label = BorrowLabel(labelIdx[blk.Company])
+			}
 		}
 		cands := byNo[d.EquipmentNo]
 		var blockName, blockModel string
@@ -224,7 +240,11 @@ func MatchBorrowDetail(db *gorm.DB, res *DetailParseResult) (*DetailMatchResult,
 		case len(cands) == 0:
 			item.Status = MatchMissing
 			out.Missing++
-			item.Note = "编号在现有台账中不存在；按口径⑤需新建该设备或跳过（名称/型号需人工确认）"
+			if item.Label != "" {
+				item.Note = fmt.Sprintf("编号在现有台账中不存在；按既定口径用外借标签新建设备（名称/型号＝%s），或跳过", item.Label)
+			} else {
+				item.Note = "编号在现有台账中不存在；需新建该设备（名称/型号需人工确认）或跳过"
+			}
 			item.Evidence = siblingEvidence(allLabels, d.EquipmentNo)
 		case len(cands) == 1:
 			item.Status = MatchUnique
@@ -239,15 +259,20 @@ func MatchBorrowDetail(db *gorm.DB, res *DetailParseResult) (*DetailMatchResult,
 			} else {
 				item.Status = MatchAmbiguous
 				out.Ambiguous++
-				if item.Occurrences == len(cands) {
-					// 文件内出现次数与库中台数相同 → 给出“按出现顺序对应 预分配N”的建议（仍需用户确认）
-					item.SuggestedID = cands[item.Occurrence-1].EquipmentID
-					item.Note = fmt.Sprintf("库中该编号 %d 台、文件内出现 %d 次：建议按出现顺序对应 %s（需确认）",
-						len(cands), item.Occurrences, cands[item.Occurrence-1].Label)
-				} else {
-					item.Note = fmt.Sprintf("库中该编号 %d 台、文件内出现 %d 次，无法定位到具体设备 → 请人工选择",
-						len(cands), item.Occurrences)
+				// 用户口径（2026-09-11）：同号多台按候选顺序自动分配（第 1 条→第 1 台、第 2 条→第 2 台），
+				// 预览可复核、可覆盖。
+				idx := item.Occurrence - 1
+				if idx < 0 {
+					idx = 0
 				}
+				if idx >= len(cands) {
+					idx = len(cands) - 1
+				}
+				item.Chosen = cands[idx]
+				item.SuggestedID = cands[idx].EquipmentID
+				item.AutoOrder = true
+				item.Note = fmt.Sprintf("库中该编号 %d 台、文件内第 %d 次出现 → 按候选顺序分配 %s；可在预览复核或改选",
+					len(cands), item.Occurrence, cands[idx].Label)
 			}
 		}
 		if item.Chosen != nil && item.Chosen.IsCurrent {
@@ -263,6 +288,14 @@ func MatchBorrowDetail(db *gorm.DB, res *DetailParseResult) (*DetailMatchResult,
 				borrowerOrder = append(borrowerOrder, blk.Company)
 			}
 			borrowerAgg[blk.Company].Devices++
+			if item.Label != "" {
+				p := borrowerAgg[blk.Company]
+				p.Labeled++
+				if p.LabelFrom == "" {
+					p.LabelFrom = item.Label
+				}
+				p.LabelTo = item.Label
+			}
 		}
 	}
 
@@ -295,13 +328,14 @@ func MatchBorrowDetail(db *gorm.DB, res *DetailParseResult) (*DetailMatchResult,
 }
 
 // byLabelMatch 编号多台时，用文件给出的 名称/型号（或 预分配N 标签）唯一定位一台；不唯一 → nil（交人工）。
+// 注意：外借N 是按外借方顺序生成的位置标签，不用于区分同号机（同号机区分靠候选顺序）。
 func byLabelMatch(cands []*MatchCandidate, name, model string) *MatchCandidate {
 	name = strings.TrimSpace(name)
 	model = strings.TrimSpace(model)
 	if name == "" && model == "" {
 		return nil
 	}
-	// (1) 预分配N 标签（方案 A 的文件写法）
+	// (1) 候选占位标签（预分配N，方案 A 的文件写法）
 	for _, c := range cands {
 		if c.Label != "" && (name == c.Label || model == c.Label) {
 			return c

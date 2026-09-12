@@ -163,6 +163,18 @@ Excel 无归还列 → 不能从文件判定"当前哪些设备仍在外"。**�
 - 前端 ImportPage 导入成功后新增「数据对账」卡片：执行对账 → PASS/FAIL + 双侧计数 + 差异清单表。
 - 真实文件对账 e2e：2147（Excel）== 2147（DB），PASS 无差异；删除一台后 FAIL 并列出缺失（service 测试）。
 
+### v1.3 外借明细补录写入（Phase 4，2026-09-11；决策 19，单事务）
+
+- **通道接口**：`POST /api/import/borrow-detail/run`（危险操作，需 `confirm:true`）
+  body `{parse_id, confirm, choices:{source_key:equipment_id}, skip:[source_key]}`。同一文件指纹（`source_hash`）只能补录一次 → 重复请求 `409 ErrBatchImported`。
+- **外借N 标签（用户口径）**：按**外借方**各自从 1 起，对**文件中没有型号**的设备按出现顺序编号（`外借1、外借2…`）；标签**只写入外借单/流转记录的备注**，**不修改**设备台账中的真实名称与型号。`service.RenumberAllSeq` 等台账不变量不受影响。
+- **同号多台**：按候选顺序自动分配（`equipment.id` 升序：第 1 条出现 → 第 1 台、第 2 条 → 第 2 台）；预览可复核、可改选（`choices` 只接受候选内的设备 id，越界即跳过并记 `V-M2`）。
+- **未匹配编号**：用其外借标签新建设备（名称＝型号＝`外借N`），并写 `IMPORT_INIT`（时间取该次外借日期，保证时间线顺序）+ `BORROW`；新设备带 `import_batch_id/source_key`。
+- **单事务写入**（铁律 4）：解析批次 → 新建设备 → 外借方字典复用/新建 → `equipment.status=BORROWED` + `borrow_record(OUTSTANDING, borrow_date=到达时间, 预计归还留空)` + `flow_record(action=BORROW, occurred_at=到达时间, borrower_name 快照, operator=系统导入)` → 序号重算 → `IMPORT_BORROW_DETAIL` audit。任一步失败整体回滚。
+- **安全约束**：结构 BLOCK 的块整体不写入（报告标注）；设备当前已有未归还外借时**只补流转历史、不覆盖现状**（`BORROW_HISTORY_ONLY` + `V-M1` WARN）；`skip` 指定的台不写入。
+- **报告**：总台数 / 置外借 / 新建设备 / 仅补历史 / 跳过 / 块阻断 / 带标签 / 外借方 / 逐台结果（动作 + 说明）。
+- **生产库预演结果（在 `equipment.db` 副本上执行，生产库未改动）**：补录前 2147 台（在库 2028 / 外借 119）、外借单 119、流转 2266、外借方 15；补录 214 台（置外借 214、新建设备 1 = `0430701` → 名称/型号 `外借94`、内部码 `EQ-002148`、外借日期 2018-01-22）；补录后 2148 台（在库 1815 / 外借 333）、外借单 333、流转 2481、外借方 19（新增 4 个双发系）；外借日期区间 2012-12-22 ~ 2026-08-04。
+
 ### v1.3 外借明细匹配与预览（Phase 3，2026-09-11；决策 19）
 
 - **通道接口**：`POST /api/import/borrow-detail/parse`（multipart 字段 `file`）→ `{parse_id, summary, preview}`；`preview` 含块级预览、明细预览（前 200 行）、**待人工选择**、**未匹配**、外借方落库计划、问题清单（解析 V-D 系列 + 匹配 V-M1）。**只读**：不写库、不改状态。

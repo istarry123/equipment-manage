@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -65,6 +66,16 @@ func (s *detailStore) get(id string) (*detailSession, bool) {
 	defer s.mu.Unlock()
 	v, ok := s.data[id]
 	return v, ok
+}
+
+// dropFile 只删除上传文件、保留解析/匹配结果（写入后仍可查看报告）。
+func (s *detailStore) dropFile(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if v, ok := s.data[id]; ok && v.path != "" {
+		os.Remove(v.path) //nolint:errcheck
+		v.path = ""
+	}
 }
 
 type importDetailHandler struct {
@@ -296,4 +307,46 @@ func candidateJSON(c *importer.MatchCandidate) gin.H {
 		"category": c.Category, "status": c.Status, "equipment_seq": c.Seq,
 		"label": c.Label, "display_no": c.DisplayNo, "is_current": c.IsCurrent,
 	}
+}
+
+// RunDetail POST /api/import/borrow-detail/run（危险操作，需 confirm:true）。
+// body: { parse_id, confirm, choices: {source_key: equipment_id}, skip: [source_key] }
+// 单事务：新建设备（未匹配，名称/型号＝外借N）→ 外借方建档 → 置 BORROWED + 外借单 +
+// 流转记录（历史日期）→ 序号重算 → audit。同文件指纹幂等（重复补录被拒）。
+func (h *importDetailHandler) RunDetail(c *gin.Context) {
+	var body struct {
+		ParseID string          `json:"parse_id"`
+		Confirm bool            `json:"confirm"`
+		Choices map[string]uint `json:"choices"`
+		Skip    []string        `json:"skip"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.ParseID == "" {
+		writeError(c, http.StatusBadRequest, "缺少 parse_id")
+		return
+	}
+	if !body.Confirm {
+		writeError(c, http.StatusBadRequest, "补录会改变设备状态并新增历史记录：请先确认（confirm: true）")
+		return
+	}
+	sess, ok := h.store.get(body.ParseID)
+	if !ok {
+		writeError(c, http.StatusNotFound, "解析会话不存在或已过期，请重新上传文件")
+		return
+	}
+	skip := map[string]bool{}
+	for _, k := range body.Skip {
+		skip[k] = true
+	}
+	report, err := importer.ImportBorrowDetail(h.server.DB, sess.parse, sess.match,
+		importer.BorrowDetailOptions{Choices: body.Choices, Skip: skip})
+	if err != nil {
+		if errors.Is(err, importer.ErrBatchImported) {
+			writeError(c, http.StatusConflict, err.Error())
+			return
+		}
+		writeError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.store.dropFile(body.ParseID)
+	c.JSON(http.StatusOK, gin.H{"report": report})
 }
