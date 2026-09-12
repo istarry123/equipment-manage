@@ -40,6 +40,7 @@
 
 - 后端：Go + Gin + SQLite + GORM + go:embed（内嵌前端静态资源）
 - 前端：React + TypeScript + Vite + Ant Design + ECharts
+- 前端补充（2026-09-12，决策 20）：界面改版新增 **`react-router-dom`**（页面可寻址/刷新保持/前进后退，Phase 2 引入）；**明确不引入 Next.js**（与 Win7 + Chrome 109 浏览器基线及单 exe + go:embed 交付形态硬冲突，证据见决策 20）
 - 交付形态：Windows 单机 `equipment.exe`，双击启动 → 自动打开 `http://localhost:8080`
 - **Win7 兼容约束（2026-09-07 新增目标）**：Win7 SP1 纳入交付支持范围后，后端须锁定 **Go ≤ 1.20**（最后支持 Win7 的版本）工具链、`CGO_ENABLED=0` 纯 Go 构建（SQLite 用 `modernc.org/sqlite`，避免 mingw/winpthread 运行时 DLL）；前端按 **Chrome 109 / Firefox ESR 115**（Win7 可用浏览器上限）能力构建与实测。
 
@@ -80,6 +81,16 @@
     - 口径定稿（2026-09-11，Phase 4 前用户确认）：①同号多台**按候选顺序自动分配**（`equipment.id` 升序：第 1 条出现→第 1 台、第 2 条→第 2 台），预览可复核、可改选；②标签统一用 **外借1/外借2…**——按**外借方**各自从 1 起、对文件中**没有型号**的设备按出现顺序顺延（本次＝该司全部设备），标签只写外借单/流转备注，**不改台账真实名称型号**；③未匹配编号（`0430701`）**用其外借标签新建设备**（名称＝型号＝外借N）。
     - 分阶段（每 Phase 测试 + 提交 + STOP 等验收）：**Phase 1 模板校验 ✅** → Phase 2 外借明细解析器 → Phase 3 匹配/预览/确认（歧义与未匹配交人工）→ Phase 4 单事务写入（BORROWED + borrow_record + flow_record）+ 对账。
 
+20. **v1.4 界面改版（2026-09-12，用户确认 4 项决策；方案 `docs/ui-redesign-plan.md`，令牌 `docs/ui-design-tokens.md`）**：
+    - 起因：用户要求「优化界面，加上 Next.js，以 https://www.deepseek.com/harness/en/ 为范例」。方案阶段结论：**观感来自设计令牌，不来自框架**。
+    - **决策 ①：不引入 Next.js**。证据（Next.js 16.3.5，2026-08-25 文档）：官方浏览器基线 **Chrome 111+ / Firefox 111+**，而本项目 Win7 目标上限为 **Chrome 109 / Firefox ESR 115**（决策 11）→ 硬冲突；构建需 **Node.js 20.9+**（Node 20 无法装在 Win7）；App Router 基于 **React 19.2 canary**，而本项目锁定 React 18.2 + antd 5.8.6；静态导出（`output:'export'`）下 Server Actions/Cookies/Headers/Rewrites/ISR/动态路由/默认 `next/image` 优化**均不可用**，且需重配 `basePath/assetPrefix`、改 `go:embed` 布局与 `api.go` 的 `NoRoute` SPA 回退。降级 Next 14 可避开前两条但须锁定两代前的旧框架，收益为零 → 不采纳。
+    - **决策 ②：默认深色 + 一键切换浅色**（两套语义令牌 + 顶栏切换 + localStorage 记忆）。
+    - **决策 ③：引入 `react-router-dom`**（页面 URL 可寻址、刷新保持、浏览器前进/后退），Phase 2 实施；除此之外不新增任何前端依赖（不引入 Tailwind / CSS-in-JS 库 / UI 组件库）。
+    - **决策 ④：先只批准 Phase 0–1**（视觉基准与令牌 + 令牌落地换肤）；Phase 2–6 需阶段性验收后另行批准。
+    - 设计令牌来源：本机 DSH 设计系统 `@deepseek-ai/dsh-client-ui-theme`（**实测取得，非猜测**）+ 范例站版式语言。深色模式六状态色经 WCAG 实测全部达 AA（≥4.5:1）。
+    - Phase 划分：Phase 0（视觉基准/令牌，只读）→ Phase 1（令牌落地换肤 + 清理硬编码色，页面结构不动）→ Phase 2（布局骨架/导航 + react-router）→ Phase 3（Dashboard 改版）→ Phase 4（列表页统一）→ Phase 5（关键流程/危险操作）→ Phase 6（交付回归 + v1.4.0）。
+    - 不变量：数据层/API/状态机/导入对账/备份恢复/导出/Win7 兼容/单 exe + go:embed 交付**全程不动**。
+
 ## 6. 当前项目状态（每次阶段推进后更新）
 
 - Git：`main` 分支已初始化；基线提交完成（主章程 + 本治理文件 + 内嵌 Skill + `设备借出总账.xlsx` 入库）。
@@ -110,4 +121,12 @@
   - **界面口径（2026-09-12，用户要求）**：列表分页统一——**设备台账每页 20 条**（总查看），**其他查看类列表每页 10 条**（班组设备/外借/导入预览/备份/设置/明细补录等），不足一页不显示分页控件；实现集中在 `web/src/pagination.ts`（`PAGE_SIZE_LEDGER=20` / `PAGE_SIZE_LIST=10` / `listPagination()`），各页面统一引用；`docs/user-guide.md` §3 已写明。release/equipment/ 已重建（版本号仍 v1.3.0）。
   - **数据放置提示**：`release/equipment/` 是**交付目录**，其中的 `equipment.db` 曾被 9/10 测试版留成空库（本次已用工作区生产库 `equipment.db`（2147 台）覆盖，原空库备份在 `.tmp/release-db-backup/`）。给已有数据的电脑升级时务必用 `scripts/update-app.ps1` 或只替换 `equipment.exe`，不要整体覆盖程序目录（用户手册 §9 已写明）。
   - 构建：`scripts/build-release.ps1` 产出 `release/equipment/`（含 Phase 1–5 与界面分页口径；**未覆盖根目录 `equipment.exe`**，按用户要求）。
+- **v1.4 界面改版（2026-09-12，决策 20；方案 `docs/ui-redesign-plan.md`、令牌 `docs/ui-design-tokens.md`）**：
+  - **方案落档 ✅**：确认「不引入 Next.js」（三条硬冲突证据：Chrome 111 基线 vs Chrome 109 目标、Node 20.9 构建 vs Win7、React 19.2 canary vs 锁定 React 18.2/antd 5.8.6）；确认「默认深色 + 一键切换浅色」；确认 Phase 2 引入 `react-router-dom`；确认**先只批准 Phase 0–1**。产出 `docs/ui-redesign-plan.md`（Phase 0–6 划分、不变量、风险对策）。
+  - **Phase 0 视觉基准与设计令牌 ✅**：从本机 DSH 设计系统 `@deepseek-ai/dsh-client-ui-theme` **实测**取得静态色板与语义别名（非猜测，附可复现采样命令）；对全部候选色做 WCAG 实测 —— **深色模式六状态色全部达 AA（5.23–9.53）**；实测发现既有硬编码色在深色底**不合格**（`#cf1322` 3.27、`#666` 3.18、`#722ed1` 2.63），列入 Phase 1 清理。产出 `docs/ui-design-tokens.md`（令牌表、状态映射、字阶、间距/圆角、antd 映射、组件规范、已知偏差 §11）。
+  - **Phase 1 令牌落地（换肤）✅ 本次** —— 新增 `web/src/theme.ts`（**全站唯一色值来源**：深浅两套语义别名 + `applyCssVariables()` + `buildAntdTheme()`）、`themeMode.tsx`（模式 Context + localStorage 记忆 + 首屏前预写入防闪烁）、`status.ts`（六状态文案/配色唯一来源：CSS 变量版给 DOM、实色版给 ECharts 画布）、`echartsTheme.ts`（深浅两套主题，模块加载即注册）、`global.css`（**只引用 `var(--...)`**，不写字面色值）；`main.tsx` 挂 `ThemeModeProvider` + 动态 `ConfigProvider`；`App.tsx` 顶栏新增深浅切换按钮并清理 `#001529`/`#fff`/`#aaa`；`DashboardPage` 图表改传 `ECHARTS_THEME[mode]` 并改用 `status.ts` 供色；`BorrowsPage`/`ImportPage`/`ImportDetailPage` 清理 `#cf1322`/`#722ed1`/`#fa8c16`/`#666`/`#888`。**页面结构、表格列、分页口径（20/10）、业务逻辑、后端与 API 全部未改**。
+    - 实施中发现并修正的 antd 5.8.6 约束（由 TS 编译期拦截）：Layout 组件令牌实为 `colorBgHeader`/`colorBgBody`/`colorBgTrigger`；**Table 组件令牌接口为空**（`ComponentToken {}`），表头底色/文字色改由 `global.css` 语义变量接管；Sider 底色用内联 `var(--bg-layer-1)`。
+    - 验证：`tsc --noEmit` ✅、`vite build`（`target: chrome109` 不变）✅、`go build ./...` ✅、`go test ./... -count=1` 全绿（api/config/database/importer/service）✅；`web/src` 除 `theme.ts` 外 `#hex` 扫描 **0 处**（55 个色值全部集中）；`#001529`/`theme="dark"` 残留 0 处。**深浅切换与对比度的浏览器实机目视待用户验收**（本环境无浏览器，不做未验证的断言）。
+    - 留待后续：浅色模式「外借」文字色偏差（tokens §11 第 1 项）→ Phase 4；其余页面状态映射收敛到 `status.ts` → Phase 4；`docs/user-guide.md` 界面说明 → 按方案由 Phase 6 随发布补写。
+    - 交付物**未重建**（`release/equipment/` 与根目录 `equipment.exe` 仍为 v1.3.0），前端页脚版本号未改 —— 按 Phase 6 统一收口。
 - 最终验收待办（目标电脑）：① Win10/11 全流程走查；② Win7 SP1 实机回归（需 Chrome109/FF115）；③ Chrome109 离线包放入 install/；④ v1.1 全流程（状态推导→display_no→Preview/Review→清空重导→对账→回归→文档）验收；⑤ v1.2 导出流程走查；⑥ v1.3 Phase 1 模板校验实测（上传非模板文件应被拒绝并提示）。
