@@ -225,6 +225,7 @@ export function buildAntdTheme(mode: ThemeMode): ThemeConfig {
       Layout: {
         colorBgHeader: a.bgLayer1,
         colorBgBody: a.bgBase,
+        colorBgTrigger: a.bgLayer2,
       },
       Menu: {
         itemBg: 'transparent',

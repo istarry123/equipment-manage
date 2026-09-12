@@ -60,6 +60,41 @@ body {
   background: var(--scrollbar-hover);
 }
 
+/* 页面头（PageHeader）：标题 + 一句话说明 + 右侧操作区 */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.page-header__main {
+  min-width: 0;
+}
+
+.page-header__title {
+  margin: 0 !important;
+  color: var(--text-primary) !important;
+}
+
+.page-header__desc {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.page-header__extra {
+  margin-left: auto;
+  flex: none;
+}
+
+/* 侧栏菜单：条目较多时允许滚动，避免 1366×768 下溢出 */
+.app-sider .ant-menu {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
 /*
  * 表格样式：antd 5.8.6 的 Table 组件令牌接口为空（ComponentToken {}），
  * 无法通过 ConfigProvider 定制表头，故在此用语义变量统一接管。

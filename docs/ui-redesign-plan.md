@@ -132,10 +132,32 @@
 - **验收**：`npm run build` 通过；逐页走查对比度；深浅两模式切换与刷新记忆；Chrome 109 实测（**由用户在有浏览器的环境确认，见阶段报告**）。
 - **回退**：`git revert` 单个提交即回到 v1.3.0 观感。
 
-### Phase 2 — 布局骨架与导航
+### Phase 2 — 布局骨架与导航 ✅（2026-09-12 完成）
 - **范围**：`App.tsx` 重构为顶栏 + 可折叠侧栏 + 内容区；统一 `PageHeader` 组件；引入 `react-router-dom`（页面可寻址、刷新保持、前进后退）；`/api` 代理与 `NoRoute` 回退保持兼容。
 - **验收**：10 个菜单逐项打开；1366×768（Win7 常见分辨率）不塌陷；URL 直接访问/刷新/后退均正确；后端 SPA 回退不需改动。
 - **风险**：`react-router-dom` 需联网安装（若离线，需先确认 npm 源可用）。
+
+**实施记录：**
+
+- 新增 `web/src/routes.tsx`：**路由与菜单的唯一来源**（key/path/label/description/icon），一处驱动侧栏菜单、页面头标题与说明、`document.title`；路径匹配容忍结尾斜杠。
+- 新增 `web/src/PageHeader.tsx` + `global.css` 对应样式。
+- `App.tsx` 改为应用外壳：顶栏（品牌名可点击回默认页 + 版本 + 深浅切换）+ 可折叠侧栏（`collapsible`，展开 200px / 收起 56px）+ 内容区（`PageHeader` + `<Routes>`）；未登记路径统一 `<Navigate>` 回默认页。
+- `main.tsx` 增加 `BrowserRouter`（放在 `ConfigProvider` 内层）。
+- 跨页打开设备详情改为**路由 state 传递**（`navigate('/equipment', { state: { openDeviceId } })`），`App.tsx` 不再持有跳转状态；`EquipmentPage` / `TeamViewPage` 的 props 接口未变，**页面组件零改动**。
+- `theme.ts` 补 `Layout.colorBgTrigger`（折叠触发器底色）。
+
+**与初版方案的两处偏差（已记录）：**
+
+1. **`PageHeader` 由外壳驱动，而非逐页嵌入**：标题与一句话说明取自 `routes.tsx`，10 个页面组件**完全不改**（降低回归面）。页面级操作按钮（导出、刷新等）留待 Phase 4/5 统一。
+2. **依赖版本选 `react-router-dom@6.30.6`（精确锁定）而非 v7**：v7 已转向 framework/data-router 模式，对本项目 10 页 SPA 属多余复杂度；v6 行为面更小、与 React 18 组合最稳。理由记入 `AGENTS.md` 决策 20。
+
+**新增后端回归测试** `internal/api/spa_test.go`（3 用例）——深链接刷新是**后端行为**，必须由后端测试守住：
+
+| 用例 | 断言 |
+|---|---|
+| `TestSPAFallbackDeepRoutes` | 10 条前端路由 + `/` + 未登记路径，全部 200 且回退到 `index.html` |
+| `TestAPINotSwallowedBySPAFallback` | `/api/...` 未知路径仍返回 JSON 404，不被 SPA 回退吞成 HTML |
+| `TestStaticAssetsServedFromEmbed` | 从 `index.html` 动态提取 `./assets/*` 引用并逐个请求，均 200 且非空（不硬编码构建哈希） |
 
 ### Phase 3 — Dashboard 改版
 - **范围**：KPI Hero（大字号数字 + 说明 + 占比）、卡片网格、逾期高亮、最近流转时间线、图表美化。**只用现有 `/api/dashboard` 字段，不改后端**。

@@ -40,7 +40,7 @@
 
 - 后端：Go + Gin + SQLite + GORM + go:embed（内嵌前端静态资源）
 - 前端：React + TypeScript + Vite + Ant Design + ECharts
-- 前端补充（2026-09-12，决策 20）：界面改版新增 **`react-router-dom`**（页面可寻址/刷新保持/前进后退，Phase 2 引入）；**明确不引入 Next.js**（与 Win7 + Chrome 109 浏览器基线及单 exe + go:embed 交付形态硬冲突，证据见决策 20）
+- 前端补充（2026-09-12，决策 20）：界面改版新增 **`react-router-dom`（精确锁定 6.30.6，Phase 2 已引入）**（页面 URL 可寻址/刷新保持/前进后退）；**明确不引入 Next.js**（与 Win7 + Chrome 109 浏览器基线及单 exe + go:embed 交付形态硬冲突，证据见决策 20）
 - 交付形态：Windows 单机 `equipment.exe`，双击启动 → 自动打开 `http://localhost:8080`
 - **Win7 兼容约束（2026-09-07 新增目标）**：Win7 SP1 纳入交付支持范围后，后端须锁定 **Go ≤ 1.20**（最后支持 Win7 的版本）工具链、`CGO_ENABLED=0` 纯 Go 构建（SQLite 用 `modernc.org/sqlite`，避免 mingw/winpthread 运行时 DLL）；前端按 **Chrome 109 / Firefox ESR 115**（Win7 可用浏览器上限）能力构建与实测。
 
@@ -129,4 +129,9 @@
     - 验证：`tsc --noEmit` ✅、`vite build`（`target: chrome109` 不变）✅、`go build ./...` ✅、`go test ./... -count=1` 全绿（api/config/database/importer/service）✅；`web/src` 除 `theme.ts` 外 `#hex` 扫描 **0 处**（55 个色值全部集中）；`#001529`/`theme="dark"` 残留 0 处。**深浅切换与对比度的浏览器实机目视待用户验收**（本环境无浏览器，不做未验证的断言）。
     - 留待后续：浅色模式「外借」文字色偏差（tokens §11 第 1 项）→ Phase 4；其余页面状态映射收敛到 `status.ts` → Phase 4；`docs/user-guide.md` 界面说明 → 按方案由 Phase 6 随发布补写。
     - 交付物**未重建**（`release/equipment/` 与根目录 `equipment.exe` 仍为 v1.3.0），前端页脚版本号未改 —— 按 Phase 6 统一收口。
+  - **Phase 2 布局骨架与导航 ✅ 本次** —— 新增 `web/src/routes.tsx`（**路由与菜单唯一来源**：key/path/label/description/icon，一处驱动侧栏菜单、页面头标题与说明、`document.title`；路径匹配容忍结尾斜杠）、`web/src/PageHeader.tsx`（标题 + 一句话说明）；`App.tsx` 重构为应用外壳（顶栏含品牌名/版本/深浅切换 + 可折叠侧栏 200/56px + 内容区 + `<Routes>`），未登记路径统一 `<Navigate>` 回默认页；`main.tsx` 加 `BrowserRouter`；`theme.ts` 补 `Layout.colorBgTrigger`；`global.css` 增页面头样式与侧栏菜单滚动。跨页打开设备详情改走**路由 state**，`EquipmentPage`/`TeamViewPage` 的 props 未变 —— **10 个页面组件零改动**。
+    - 依赖选型：`react-router-dom` **精确锁定 6.30.6**（未选 v7：v7 已转向 framework/data-router 模式，对本项目 10 页 SPA 属多余复杂度；v6 行为面更小）。安装时系统盘 npm 缓存目录 EPERM，改用仓库内 `web/.npm-cache`；`npm install` 报告移除 87 个 on-disk 冗余包 —— 已核对：`package-lock` 仅 +43 行（只新增 react-router / react-router-dom / @remix-run/router）、顶层依赖齐全、esbuild 二进制在位、构建产物一致，**构建链未被破坏**。
+    - 与初版方案的偏差（已记入方案文档）：`PageHeader` 由**外壳驱动**（标题/说明取自 `routes.tsx`）而非逐页嵌入，页面级操作按钮留待 Phase 4/5。
+    - **新增后端回归测试** `internal/api/spa_test.go`（3 用例）：10 条前端路由 + `/` + 未登记路径全部 200 且回退 `index.html`（守住**深链接刷新**）；`/api` 未知路径仍 JSON 404 不被 SPA 回退吞成 HTML；从 `index.html` 动态提取 `./assets/*` 逐个请求均 200 非空（不硬编码构建哈希）。
+    - 验证：`tsc --noEmit` ✅、`vite build` ✅（3336 模块 / JS 2.28 MB / gzip 739 kB）、`go build ./...` ✅、`go test ./... -count=1` 全绿 ✅；路由表一致性脚本校验：`routes.tsx` 10 条路径 ↔ `App.tsx` `<Route>` 12 条（含 `/` 与 `*`）双向无遗漏。**1366×768 布局、10 个菜单逐项打开、浏览器前进/后退与刷新待用户实机验收**（本环境无浏览器）。
 - 最终验收待办（目标电脑）：① Win10/11 全流程走查；② Win7 SP1 实机回归（需 Chrome109/FF115）；③ Chrome109 离线包放入 install/；④ v1.1 全流程（状态推导→display_no→Preview/Review→清空重导→对账→回归→文档）验收；⑤ v1.2 导出流程走查；⑥ v1.3 Phase 1 模板校验实测（上传非模板文件应被拒绝并提示）。

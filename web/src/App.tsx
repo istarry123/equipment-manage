@@ -1,18 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Badge, Button, Layout, Menu, Tooltip, Typography } from 'antd';
-import {
-  AppstoreOutlined,
-  BulbOutlined,
-  DatabaseOutlined,
-  DashboardOutlined,
-  ExportOutlined,
-  FileAddOutlined,
-  ImportOutlined,
-  ProfileOutlined,
-  SettingOutlined,
-  SwapOutlined,
-  TeamOutlined,
-} from '@ant-design/icons';
+import { BulbOutlined } from '@ant-design/icons';
 import DashboardPage from './DashboardPage';
 import EquipmentPage from './EquipmentPage';
 import ImportPage from './ImportPage';
@@ -22,64 +11,45 @@ import BorrowsPage from './BorrowsPage';
 import BackupPage from './BackupPage';
 import SettingsPage from './SettingsPage';
 import TeamViewPage from './TeamViewPage';
+import PageHeader from './PageHeader';
+import { DEFAULT_PATH, ROUTES, routeByPath } from './routes';
 import { useThemeMode } from './themeMode';
 
 const { Header, Sider, Content } = Layout;
 
-const MENU_ITEMS = [
-  { key: 'dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
-  { key: 'equipment', icon: <AppstoreOutlined />, label: '设备台账' },
-  { key: 'teamview', icon: <ProfileOutlined />, label: '班组设备' },
-  { key: 'flow', icon: <SwapOutlined />, label: '设备流转' },
-  { key: 'borrow', icon: <ExportOutlined />, label: '外借管理' },
-  { key: 'team', icon: <TeamOutlined />, label: '班组管理' },
-  { key: 'import', icon: <ImportOutlined />, label: '数据导入' },
-  { key: 'importDetail', icon: <FileAddOutlined />, label: '外借明细导入' },
-  { key: 'backup', icon: <DatabaseOutlined />, label: '数据备份' },
-  { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
-];
+const APP_NAME = '设备资产与流转管理系统';
+// 版本号在 Phase 6 随发布统一升为 v1.4.0（Phase 2 不提前改版本）
+const APP_VERSION = 'v1.3.0';
 
+function pathOf(key: string): string {
+  return ROUTES.find((r) => r.key === key)?.path ?? DEFAULT_PATH;
+}
+
+/**
+ * 应用外壳（v1.4 Phase 2）：顶栏 + 可折叠侧栏 + 内容区（统一页面头）。
+ * 页面组件本身不做任何改动；菜单、页面标题、document.title 均由 routes.tsx 一处驱动。
+ */
 export default function App() {
-  const [active, setActive] = useState('dashboard');
-  // 跨页打开设备详情：由班组设备页点击编号触发，复用设备台账页既有详情抽屉
-  const [detailRequestId, setDetailRequestId] = useState<number | null>(null);
+  const navigate = useNavigate();
+  const location = useLocation();
   const { mode, toggleMode } = useThemeMode();
+  const [collapsed, setCollapsed] = useState(false);
+
+  const meta = routeByPath(location.pathname);
+  const activeKey = meta?.key ?? 'dashboard';
+  // 跨页打开设备详情：由班组设备页经路由 state 传递，本组件不再持有跳转状态
+  const detailRequestId = (location.state as { openDeviceId?: number } | null)?.openDeviceId ?? null;
+
+  useEffect(() => {
+    document.title = meta ? `${meta.label} · ${APP_NAME}` : APP_NAME;
+  }, [meta]);
 
   const goMenu = (key: string) => {
-    setActive(key);
-    if (key !== 'equipment' && key !== 'flow') {
-      setDetailRequestId(null);
-    }
+    navigate(pathOf(key));
   };
 
   const openDeviceDetail = (id: number) => {
-    setDetailRequestId(id);
-    setActive('equipment');
-  };
-
-  const renderPage = () => {
-    switch (active) {
-      case 'equipment':
-      case 'flow': // 流转操作入口：设备详情中按状态提供可用动作
-        return <EquipmentPage requestOpenId={detailRequestId} />;
-      case 'teamview':
-        return <TeamViewPage onOpenDevice={openDeviceDetail} />;
-      case 'borrow':
-        return <BorrowsPage />;
-      case 'team':
-        return <TeamsPage />;
-      case 'import':
-        return <ImportPage />;
-      case 'importDetail':
-        return <ImportDetailPage />;
-      case 'backup':
-        return <BackupPage />;
-      case 'settings':
-        return <SettingsPage />;
-      case 'dashboard':
-      default:
-        return <DashboardPage onOpenTeamView={() => goMenu('teamview')} />;
-    }
+    navigate(pathOf('equipment'), { state: { openDeviceId: id } });
   };
 
   return (
@@ -93,10 +63,14 @@ export default function App() {
           borderBottom: '1px solid var(--border-l1)',
         }}
       >
-        <Typography.Title level={4} style={{ color: 'var(--text-primary)', margin: 0 }}>
-          设备资产与流转管理系统
+        <Typography.Title
+          level={4}
+          onClick={() => navigate(DEFAULT_PATH)}
+          style={{ color: 'var(--text-primary)', margin: 0, cursor: 'pointer', whiteSpace: 'nowrap' }}
+        >
+          {APP_NAME}
         </Typography.Title>
-        <Badge status="processing" text={<span style={{ color: 'var(--text-tertiary)' }}>v1.3.0</span>} />
+        <Badge status="processing" text={<span style={{ color: 'var(--text-tertiary)' }}>{APP_VERSION}</span>} />
         <div style={{ marginLeft: 'auto' }}>
           <Tooltip title={mode === 'dark' ? '切换到浅色模式' : '切换到深色模式'}>
             <Button
@@ -112,16 +86,42 @@ export default function App() {
         </div>
       </Header>
       <Layout>
-        <Sider width={200} style={{ background: 'var(--bg-layer-1)', borderRight: '1px solid var(--border-l1)' }}>
+        <Sider
+          className="app-sider"
+          width={200}
+          collapsedWidth={56}
+          collapsible
+          collapsed={collapsed}
+          onCollapse={setCollapsed}
+          style={{ background: 'var(--bg-layer-1)', borderRight: '1px solid var(--border-l1)' }}
+        >
           <Menu
             mode="inline"
-            selectedKeys={[active]}
-            items={MENU_ITEMS}
+            selectedKeys={[activeKey]}
+            items={ROUTES.map((r) => ({ key: r.key, icon: r.icon, label: r.label }))}
             onClick={({ key }) => goMenu(key)}
-            style={{ height: '100%', borderRight: 0, background: 'transparent' }}
+            style={{ borderRight: 0, background: 'transparent' }}
           />
         </Sider>
-        <Content style={{ margin: 16 }}>{renderPage()}</Content>
+        <Content style={{ margin: 16, minWidth: 0 }}>
+          <PageHeader title={meta?.label ?? APP_NAME} description={meta?.description} />
+          <Routes>
+            <Route path="/" element={<Navigate to={DEFAULT_PATH} replace />} />
+            <Route path="/dashboard" element={<DashboardPage onOpenTeamView={() => goMenu('teamview')} />} />
+            {/* 「设备流转」与「设备台账」共用同一页面组件（详情内按状态提供流转动作） */}
+            <Route path="/equipment" element={<EquipmentPage requestOpenId={detailRequestId} />} />
+            <Route path="/flow" element={<EquipmentPage requestOpenId={detailRequestId} />} />
+            <Route path="/teamview" element={<TeamViewPage onOpenDevice={openDeviceDetail} />} />
+            <Route path="/borrow" element={<BorrowsPage />} />
+            <Route path="/team" element={<TeamsPage />} />
+            <Route path="/import" element={<ImportPage />} />
+            <Route path="/import-detail" element={<ImportDetailPage />} />
+            <Route path="/backup" element={<BackupPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            {/* 未登记路径（含后端 SPA 回退送来的任意 URL）统一回默认页 */}
+            <Route path="*" element={<Navigate to={DEFAULT_PATH} replace />} />
+          </Routes>
+        </Content>
       </Layout>
     </Layout>
   );
