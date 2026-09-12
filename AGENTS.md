@@ -93,7 +93,8 @@
 
 ## 6. 当前项目状态（每次阶段推进后更新）
 
-- Git：`main` 分支已初始化；基线提交完成（主章程 + 本治理文件 + 内嵌 Skill + `设备借出总账.xlsx` 入库）。
+- Git：`main` 分支已初始化；原基线提交曾把 `设备借出总账.xlsx` 入库（主章程 + 本治理文件 + 内嵌 Skill + 台账）。**2026-09-12 变更（仓库转为公开，数据脱敏）**：`设备借出总账.xlsx`、`工作簿1.xlsx` 不再入库（`.gitignore` 忽略，**本地文件保留**），并用纯原生 git plumbing 重写全部历史移除台账与 26.5 MB 的 `equipment.exe~`（未用 filter-branch/filter-repo：本环境 msys `sh.exe` 无法启动）。重写前全量备份：`.tmp/pre-rewrite-backup.bundle`（本地，不入库）。
+- ⚠️ 公开仓库仍存在的残留暴露（未处理，用户已知悉）：`AGENTS.md`、`docs/*.md`、`internal/**/*_test.go`、`web/src/*.tsx` 等约 28 个跟踪文件含真实往来单位名（泰和/华欣/双发/钰丽/丁格等）；两个 Prompt 章程原文亦含真实台账口径。
 - 数据源：`设备借出总账.xlsx` 已在工作区（单 Sheet「设备借出总账」；R2 表头 11 列：类别/设备名称/设备型号/台账数量/财务数量/台账设备编号/时间/公司/台数/借出设备编号/备注；含合并单元格、跨行主块、多行/空格分隔编号）。
 - 进度：**v1.1 重构（决策 18）已全部完成（Phase 0–13）**：Phase 0(备份/快照 1477/1478) ✅ → Phase 1(V003) ✅ → Phase 2(equipment_seq/display_no 后端) ✅ `18ed98f` → Phase 3(Parser) ✅ `14fd6e6` → Phase 4(Importer) ✅ `49123e8` → Phase 5(Borrow/Flow 历史日期) ✅ `8be0afe` → Phase 6(J 列借出事件解析) ✅ `3f4b0e1` → Phase 7(最终状态推导) ✅ `70762a5` → Phase 8(Frontend display_no) ✅ `92def2a` → Phase 9(Import Preview/Review) ✅ `3b325d3` → Phase 10(真实Excel终验/清空重导) ✅ `b61793d` → Phase 11(Reconciliation 对账) ✅ `ea13029` → Phase 12(Regression Tests) ✅ `23bd76c` → **Phase 13(Documentation) ✅ 本次**。
 - v1.1 Phase 3（Parser）要点：F 列逐 token 分类（编号原样保留可中文/重复=多台真机展开不 BLOCK；"无编号"按数量展开；描述文本→无编号+原文备注；无法判断→REVIEW 人工确认前该组不导入，绝不静默丢）；真实 Excel 审计：198 组/D 2147 = 编号 1580 + 无编号 567（含描述 1），组级数量自洽、无 mismatch；重复编号降为 WARN 后真实文件可全量导入 2147 台（原 V3 把平车 670 台误 BLOCK）。
